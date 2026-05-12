@@ -1,0 +1,44 @@
+{
+  "name": "home-service-platform",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@supabase/ssr": "0.5.2",
+    "@supabase/supabase-js": "2.46.1",
+    "next": "^15.5.18",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/google.maps": "^3.64.0",
+    "@types/node": "22.10.5",
+    "@types/react": "19.0.7",
+    "@types/react-dom": "19.0.3",
+    "@vitejs/plugin-react": "4.3.4",
+    "autoprefixer": "10.4.20",
+    "eslint": "8.57.1",
+    "eslint-config-next": "^15.5.18",
+    "eslint-config-prettier": "9.1.0",
+    "happy-dom": "15.11.6",
+    "postcss": "8.4.49",
+    "prettier": "3.3.3",
+    "tailwindcss": "3.4.15",
+    "typescript": "5.6.3",
+    "vitest": "2.1.5"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
