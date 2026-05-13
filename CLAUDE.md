@@ -8,6 +8,8 @@ The project is a modular home service business operating platform. Crystal Bear 
 
 Phase 1 is intentionally narrow. Do not overbuild. Do not create future CRM/job/scheduling/payment systems unless explicitly instructed in a later task.
 
+**Phase 2 admin work** (reorganization, shell, design tokens) is governed by `docs/PHASE_2_ADMIN_ORGANIZATION_AND_DESIGN.md`. Every new or migrated `/admin/*` page must use the shared admin shell and shared UI components defined there — no one-off page chrome, no ad-hoc Tailwind blocks, no hardcoded colors outside the semantic token set. Phase 2 must not change business logic or schema; if a task seems to require either, stop and ask first.
+
 ## Phase 1 Goal
 
 Build the smallest working vertical slice that proves the platform architecture:

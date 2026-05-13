@@ -1,7 +1,16 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
+import {
+  AdminShell,
+  EmptyState,
+  PageHeader,
+  SectionCard,
+  StatusBadge,
+  resolveAdminShellContext,
+  type StatusTone,
+} from "@/components/admin";
+import { SignOutButton } from "../sign-out-button";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +39,11 @@ export default async function LeadsPage() {
   const business = await getActiveBusinessForUser(user.id);
   if (!business) redirect("/admin");
 
+  const shell = resolveAdminShellContext({
+    workspaceName: business.name,
+    userEmail: user.email ?? "—",
+  });
+
   const { data, error } = await supabase
     .from("leads")
     .select(
@@ -42,89 +56,85 @@ export default async function LeadsPage() {
   const rows = (data ?? []) as unknown as Row[];
 
   return (
-    <main className="min-h-screen p-8 max-w-5xl mx-auto">
-      <Link href="/admin" className="text-sm text-gray-600 underline">
-        ← Admin
-      </Link>
-      <header className="mt-2 mb-6">
-        <h1 className="text-2xl font-semibold">Leads</h1>
-        <p className="text-sm text-gray-600 mt-1">
-          {business.name} · most recent {PAGE_SIZE} leads from /q submissions
-        </p>
-      </header>
+    <AdminShell
+      workspaceName={shell.workspaceName}
+      userEmail={shell.userEmail}
+      signOutSlot={<SignOutButton />}
+      stagingToolsEnabled={shell.stagingToolsEnabled}
+    >
+      <PageHeader
+        eyebrow="Business Records"
+        title="Leads"
+        description={`Business request records created when a /q visitor submits the contact form. Read-only. Most recent ${PAGE_SIZE}.`}
+      />
 
       {error ? (
-        <p className="text-sm text-red-600">
-          Failed to load leads: {error.message}
-        </p>
+        <SectionCard>
+          <p className="text-sm text-danger-strong">
+            Failed to load leads: {error.message}
+          </p>
+        </SectionCard>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-gray-700">
-          No leads yet. Submit a contact form at{" "}
-          <Link href="/q" className="underline">
-            /q
-          </Link>
-          .
-        </p>
+        <EmptyState
+          title="No leads yet"
+          description="Leads land here when a customer submits the contact form on /q."
+        />
       ) : (
-        <ul className="space-y-2">
-          {rows.map((row) => (
-            <li key={row.id}>
-              <LeadRow row={row} />
-            </li>
-          ))}
-        </ul>
+        <SectionCard padding="none">
+          <ul className="divide-y divide-line">
+            {rows.map((row) => (
+              <li key={row.id} className="p-4">
+                <LeadRow row={row} />
+              </li>
+            ))}
+          </ul>
+        </SectionCard>
       )}
-    </main>
+    </AdminShell>
   );
+}
+
+function statusTone(status: string): StatusTone {
+  switch (status) {
+    case "scheduling_requested":
+      return "success";
+    case "needs_manual_quote":
+    case "service_area_review_needed":
+      return "warning";
+    default:
+      return "default";
+  }
 }
 
 function LeadRow({ row }: { row: Row }) {
   return (
-    <div className="rounded border bg-white p-4 text-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <div className="font-medium">
-            {row.contacts?.full_name ?? "—"}
-          </div>
-          <div className="text-xs text-gray-500 mt-0.5">
-            {row.contacts?.email ?? "—"} · {row.contacts?.phone ?? "—"}
-          </div>
-          <div className="text-xs text-gray-500 mt-1 break-all">
-            {row.properties?.formatted_address ?? "—"}
-          </div>
+    <div className="flex items-start justify-between gap-3 text-sm">
+      <div className="min-w-0 flex-1">
+        <div className="font-medium text-ink">
+          {row.contacts?.full_name ?? "—"}
         </div>
-        <div className="flex flex-col items-end gap-1 text-xs whitespace-nowrap">
-          <StatusBadge status={row.status} />
-          <span className="text-gray-500">
-            {new Date(row.created_at).toLocaleString()}
-          </span>
+        <div className="mt-0.5 text-xs text-ink-muted">
+          {row.contacts?.email ?? "—"} · {row.contacts?.phone ?? "—"}
+        </div>
+        <div className="mt-1 break-all text-xs text-ink-muted">
+          {row.properties?.formatted_address ?? "—"}
+        </div>
+        <div className="mt-2 font-mono text-[11px] text-ink-faint">
+          lead {row.id.slice(0, 8)}… · contact {row.contact_id.slice(0, 8)}…
+          {row.quote_page_interaction_id
+            ? ` · interaction ${row.quote_page_interaction_id.slice(0, 8)}…`
+            : ""}
+          {row.source ? ` · ${row.source}` : ""}
         </div>
       </div>
-      <div className="mt-2 text-[11px] text-gray-500 font-mono">
-        lead {row.id.slice(0, 8)}… · contact {row.contact_id.slice(0, 8)}…
-        {row.quote_page_interaction_id
-          ? ` · interaction ${row.quote_page_interaction_id.slice(0, 8)}…`
-          : ""}
-        {row.source ? ` · ${row.source}` : ""}
+      <div className="flex shrink-0 flex-col items-end gap-1 whitespace-nowrap text-xs">
+        <StatusBadge tone={statusTone(row.status)}>
+          {row.status.replace(/_/g, " ")}
+        </StatusBadge>
+        <span className="text-ink-faint">
+          {new Date(row.created_at).toLocaleString()}
+        </span>
       </div>
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const tone =
-    status === "scheduling_requested"
-      ? "bg-green-100 text-green-800"
-      : status === "needs_manual_quote"
-        ? "bg-amber-100 text-amber-900"
-        : status === "service_area_review_needed"
-          ? "bg-amber-100 text-amber-900"
-          : "bg-gray-100 text-gray-800";
-  return (
-    <span
-      className={`text-[10px] px-2 py-0.5 rounded uppercase tracking-wide ${tone}`}
-    >
-      {status.replace(/_/g, " ")}
-    </span>
   );
 }

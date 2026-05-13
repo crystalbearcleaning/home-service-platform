@@ -1,7 +1,13 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
+import {
+  AdminShell,
+  PageHeader,
+  SectionCard,
+  resolveAdminShellContext,
+} from "@/components/admin";
+import { SignOutButton } from "../sign-out-button";
 import { PropertyDataTestClient } from "./property-data-test-client";
 
 export const dynamic = "force-dynamic";
@@ -16,31 +22,37 @@ export default async function PropertyDataTestPage() {
   const business = await getActiveBusinessForUser(user.id);
   if (!business) redirect("/admin");
 
+  const shell = resolveAdminShellContext({
+    workspaceName: business.name,
+    userEmail: user.email ?? "—",
+  });
+
   return (
-    <main className="min-h-screen p-8 max-w-3xl mx-auto">
-      <Link href="/admin" className="text-sm text-gray-600 underline">
-        ← Admin
-      </Link>
-      <header className="mt-2 mb-6">
-        <h1 className="text-2xl font-semibold">Property data test</h1>
-        <p className="text-sm text-gray-600 mt-1">
-          Internal: exercise core geo + RentCast property data lookup without
-          touching the quote flow.
-        </p>
-        <p className="text-xs text-gray-500 mt-2">
-          {business.name} · service areas seeded: Boynton Beach, Boca Raton,
-          Delray Beach.
-        </p>
-      </header>
-
-      <PropertyDataTestClient />
-
-      <p className="mt-10 text-xs text-gray-500">
-        This page does not create contacts, properties, leads, quotes,
-        quote_page_interactions, tasks, events, activities, or issues. It
-        only reads service_areas and hits Google + RentCast for the selected
-        address.
+    <AdminShell
+      workspaceName={shell.workspaceName}
+      userEmail={shell.userEmail}
+      signOutSlot={<SignOutButton />}
+      stagingToolsEnabled={shell.stagingToolsEnabled}
+    >
+      <PageHeader
+        eyebrow="Testing tools"
+        title="Property data test"
+        description="Exercise core geo + RentCast property data lookup without touching the quote flow."
+      />
+      <p className="mb-4 text-xs text-ink-faint">
+        Service areas seeded: Boynton Beach, Boca Raton, Delray Beach.
       </p>
-    </main>
+
+      <SectionCard>
+        <PropertyDataTestClient />
+      </SectionCard>
+
+      <p className="mt-6 text-xs text-ink-faint">
+        This page does not create contacts, properties, leads, quotes,
+        quote_page_interactions, tasks, events, activities, or issues.
+        It only reads service_areas and hits Google + RentCast for the
+        selected address.
+      </p>
+    </AdminShell>
   );
 }

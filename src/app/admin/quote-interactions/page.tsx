@@ -2,6 +2,17 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
+import {
+  AdminShell,
+  DetailGrid,
+  EmptyState,
+  PageHeader,
+  SectionCard,
+  StatusBadge,
+  resolveAdminShellContext,
+  type StatusTone,
+} from "@/components/admin";
+import { SignOutButton } from "../sign-out-button";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +55,11 @@ export default async function QuoteInteractionsPage() {
   const business = await getActiveBusinessForUser(user.id);
   if (!business) redirect("/admin");
 
+  const shell = resolveAdminShellContext({
+    workspaceName: business.name,
+    userEmail: user.email ?? "—",
+  });
+
   const { data, error } = await supabase
     .from("quote_page_interactions")
     .select(
@@ -56,44 +72,59 @@ export default async function QuoteInteractionsPage() {
   const rows = (data ?? []) as Row[];
 
   return (
-    <main className="min-h-screen p-8 max-w-5xl mx-auto">
-      <Link href="/admin" className="text-sm text-gray-600 underline">
-        ← Admin
-      </Link>
-      <header className="mt-2 mb-6">
-        <h1 className="text-2xl font-semibold">Quote interactions</h1>
-        <p className="text-sm text-gray-600 mt-1">
-          {business.name} · most recent {PAGE_SIZE} anonymous /q lookups
-        </p>
-        <p className="text-xs text-gray-500 mt-2">
-          Read-only. C2 writes one row per address lookup; C3 will mark
-          rows converted when the contact form lands.
-        </p>
-      </header>
+    <AdminShell
+      workspaceName={shell.workspaceName}
+      userEmail={shell.userEmail}
+      signOutSlot={<SignOutButton />}
+      stagingToolsEnabled={shell.stagingToolsEnabled}
+    >
+      <PageHeader
+        eyebrow="Business Records"
+        title="Quote interactions"
+        description={`Source / debug view of public /q submissions. One row per address lookup including out-of-area and missing-data attempts. Most recent ${PAGE_SIZE}.`}
+      />
 
       {error ? (
-        <p className="text-sm text-red-600">
-          Failed to load interactions: {error.message}
-        </p>
+        <SectionCard>
+          <p className="text-sm text-danger-strong">
+            Failed to load interactions: {error.message}
+          </p>
+        </SectionCard>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-gray-700">
-          No interactions yet. Visit{" "}
-          <Link href="/q" className="underline">
-            /q
-          </Link>{" "}
-          and select an address to create one.
-        </p>
+        <EmptyState
+          title="No interactions yet"
+          description="Open /q and pick an address to create the first one."
+        />
       ) : (
-        <ul className="space-y-2">
-          {rows.map((row) => (
-            <li key={row.id}>
-              <InteractionRow row={row} />
-            </li>
-          ))}
-        </ul>
+        <SectionCard padding="none">
+          <ul className="divide-y divide-line">
+            {rows.map((row) => (
+              <li key={row.id} className="p-4">
+                <InteractionRow row={row} />
+              </li>
+            ))}
+          </ul>
+        </SectionCard>
       )}
-    </main>
+    </AdminShell>
   );
+}
+
+function interactionTone(status: string): StatusTone {
+  switch (status) {
+    case "quote_generated":
+      return "success";
+    case "out_of_area":
+    case "property_data_missing":
+      return "warning";
+    case "contact_submitted":
+    case "converted":
+      return "info";
+    case "error":
+      return "danger";
+    default:
+      return "default";
+  }
 }
 
 function InteractionRow({ row }: { row: Row }) {
@@ -110,55 +141,73 @@ function InteractionRow({ row }: { row: Row }) {
   );
 
   return (
-    <div className="rounded border bg-white p-4 text-sm">
+    <div className="text-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="font-medium break-all">{address}</div>
-          <div className="text-xs text-gray-500 font-mono mt-0.5">
+          <div className="break-all font-medium text-ink">{address}</div>
+          <div className="mt-0.5 font-mono text-xs text-ink-faint">
             {row.normalized_city ?? "—"}
             {row.google_place_id ? ` · ${row.google_place_id}` : ""}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-1 text-xs whitespace-nowrap">
-          <StatusBadge status={row.interaction_status} />
-          <span className="text-gray-500">
+        <div className="flex shrink-0 flex-col items-end gap-1 whitespace-nowrap text-xs">
+          <StatusBadge tone={interactionTone(row.interaction_status)}>
+            {row.interaction_status.replace(/_/g, " ")}
+          </StatusBadge>
+          <span className="text-ink-faint">
             {new Date(row.created_at).toLocaleString()}
           </span>
         </div>
       </div>
 
-      <dl className="mt-3 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2 text-xs">
-        <Field label="service area" value={row.service_area_status} />
-        <Field label="property data" value={row.property_data_status} />
-        <Field
-          label="selected option"
-          value={row.selected_option_key ?? "—"}
+      <div className="mt-3">
+        <DetailGrid
+          columns={4}
+          items={[
+            { label: "Service area", value: row.service_area_status },
+            { label: "Property data", value: row.property_data_status },
+            {
+              label: "Selected option",
+              value: row.selected_option_key ?? "—",
+              tone: row.selected_option_key ? "default" : "muted",
+            },
+            {
+              label: "Selected total",
+              value:
+                row.selected_total !== null ? `$${row.selected_total}` : "—",
+              tone: row.selected_total !== null ? "default" : "muted",
+            },
+            {
+              label: "Converted",
+              value: converted ? "yes" : "no",
+              tone: converted ? "default" : "muted",
+            },
+            ...(row.converted_at
+              ? [
+                  {
+                    label: "Converted at",
+                    value: new Date(row.converted_at).toLocaleString(),
+                  },
+                ]
+              : []),
+            ...(previewOptions
+              ? [
+                  {
+                    label: "Preview prices",
+                    value: `one $${previewOptions.one_time ?? "—"} · 6mo $${previewOptions.six_month ?? "—"} · 3mo $${previewOptions.three_month ?? "—"}${
+                      previewInterior !== undefined
+                        ? ` · int +$${previewInterior}`
+                        : ""
+                    }`,
+                  },
+                ]
+              : []),
+          ]}
         />
-        <Field
-          label="selected total"
-          value={row.selected_total !== null ? `$${row.selected_total}` : "—"}
-        />
-        <Field label="converted" value={converted ? "yes" : "no"} />
-        {row.converted_at && (
-          <Field
-            label="converted at"
-            value={new Date(row.converted_at).toLocaleString()}
-          />
-        )}
-        {previewOptions && (
-          <Field
-            label="preview prices"
-            value={`one $${previewOptions.one_time ?? "—"} · 6mo $${previewOptions.six_month ?? "—"} · 3mo $${previewOptions.three_month ?? "—"}${
-              previewInterior !== undefined
-                ? ` · int +$${previewInterior}`
-                : ""
-            }`}
-          />
-        )}
-      </dl>
+      </div>
 
       {converted && (
-        <dl className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px] border-t pt-3">
+        <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-1 border-t border-line pt-3 text-[11px] sm:grid-cols-2">
           {row.converted_contact_id && (
             <IdLink label="contact" id={row.converted_contact_id} />
           )}
@@ -169,14 +218,14 @@ function InteractionRow({ row }: { row: Row }) {
             <IdLink
               label="lead"
               id={row.converted_lead_id}
-              href={`/admin/leads`}
+              href="/admin/leads"
             />
           )}
           {row.converted_quote_id && (
             <IdLink
               label="quote"
               id={row.converted_quote_id}
-              href={`/admin/quotes`}
+              href="/admin/quotes"
             />
           )}
         </dl>
@@ -197,8 +246,8 @@ function IdLink({
   const short = `${id.slice(0, 8)}…`;
   return (
     <div className="flex items-center gap-2">
-      <dt className="text-gray-500 uppercase tracking-wide">{label}</dt>
-      <dd className="font-mono">
+      <dt className="uppercase tracking-wide text-ink-faint">{label}</dt>
+      <dd className="font-mono text-ink">
         {href ? (
           <Link href={href} className="underline" title={id}>
             {short}
@@ -207,37 +256,6 @@ function IdLink({
           <span title={id}>{short}</span>
         )}
       </dd>
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const tone =
-    status === "quote_generated"
-      ? "bg-green-100 text-green-800"
-      : status === "out_of_area"
-        ? "bg-amber-100 text-amber-900"
-        : status === "property_data_missing"
-          ? "bg-amber-100 text-amber-900"
-          : status === "contact_submitted" || status === "converted"
-            ? "bg-blue-100 text-blue-900"
-            : status === "error"
-              ? "bg-red-100 text-red-900"
-              : "bg-gray-100 text-gray-800";
-  return (
-    <span
-      className={`text-[10px] px-2 py-0.5 rounded uppercase tracking-wide ${tone}`}
-    >
-      {status.replace(/_/g, " ")}
-    </span>
-  );
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-gray-500">{label}</dt>
-      <dd className="font-medium break-all">{value}</dd>
     </div>
   );
 }

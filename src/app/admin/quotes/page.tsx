@@ -1,7 +1,16 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
+import {
+  AdminShell,
+  DetailGrid,
+  EmptyState,
+  PageHeader,
+  SectionCard,
+  StatusBadge,
+  resolveAdminShellContext,
+} from "@/components/admin";
+import { SignOutButton } from "../sign-out-button";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +41,11 @@ export default async function QuotesPage() {
   const business = await getActiveBusinessForUser(user.id);
   if (!business) redirect("/admin");
 
+  const shell = resolveAdminShellContext({
+    workspaceName: business.name,
+    userEmail: user.email ?? "—",
+  });
+
   const { data, error } = await supabase
     .from("quotes")
     .select(
@@ -45,95 +59,93 @@ export default async function QuotesPage() {
   const now = Date.now();
 
   return (
-    <main className="min-h-screen p-8 max-w-5xl mx-auto">
-      <Link href="/admin" className="text-sm text-gray-600 underline">
-        ← Admin
-      </Link>
-      <header className="mt-2 mb-6">
-        <h1 className="text-2xl font-semibold">Quotes</h1>
-        <p className="text-sm text-gray-600 mt-1">
-          {business.name} · most recent {PAGE_SIZE} immutable quote snapshots
-        </p>
-      </header>
+    <AdminShell
+      workspaceName={shell.workspaceName}
+      userEmail={shell.userEmail}
+      signOutSlot={<SignOutButton />}
+      stagingToolsEnabled={shell.stagingToolsEnabled}
+    >
+      <PageHeader
+        eyebrow="Business Records"
+        title="Quotes"
+        description={`Immutable price snapshots. Each row preserves options, line items, and calculation as they existed at submission. Most recent ${PAGE_SIZE}.`}
+      />
 
       {error ? (
-        <p className="text-sm text-red-600">
-          Failed to load quotes: {error.message}
-        </p>
+        <SectionCard>
+          <p className="text-sm text-danger-strong">
+            Failed to load quotes: {error.message}
+          </p>
+        </SectionCard>
       ) : rows.length === 0 ? (
-        <p className="text-sm text-gray-700">
-          No quotes yet. Quotes are created when a customer with an instant
-          quote submits the scheduling request.
-        </p>
+        <EmptyState
+          title="No quotes yet"
+          description="Quotes appear once a /q visitor with an instant quote submits the scheduling request."
+        />
       ) : (
-        <ul className="space-y-2">
-          {rows.map((row) => {
-            const expired = new Date(row.expires_at).getTime() < now;
-            return (
-              <li key={row.id}>
-                <QuoteRow row={row} expired={expired} />
-              </li>
-            );
-          })}
-        </ul>
+        <SectionCard padding="none">
+          <ul className="divide-y divide-line">
+            {rows.map((row) => {
+              const expired = new Date(row.expires_at).getTime() < now;
+              return (
+                <li key={row.id} className="p-4">
+                  <QuoteRow row={row} expired={expired} />
+                </li>
+              );
+            })}
+          </ul>
+        </SectionCard>
       )}
-    </main>
+    </AdminShell>
   );
 }
 
 function QuoteRow({ row, expired }: { row: Row; expired: boolean }) {
   return (
-    <div className="rounded border bg-white p-4 text-sm">
+    <div className="text-sm">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
-          <div className="font-medium">{row.contacts?.full_name ?? "—"}</div>
-          <div className="text-xs text-gray-500 mt-0.5">
+          <div className="font-medium text-ink">
+            {row.contacts?.full_name ?? "—"}
+          </div>
+          <div className="mt-0.5 text-xs text-ink-muted">
             {row.contacts?.email ?? "—"}
           </div>
-          <div className="text-xs text-gray-500 mt-1 break-all">
+          <div className="mt-1 break-all text-xs text-ink-muted">
             {row.properties?.formatted_address ?? "—"}
           </div>
         </div>
-        <div className="flex flex-col items-end gap-1 text-xs whitespace-nowrap">
-          <span className="text-[10px] px-2 py-0.5 rounded uppercase tracking-wide bg-blue-100 text-blue-900">
-            {row.status}
-          </span>
-          {expired && (
-            <span className="text-[10px] px-2 py-0.5 rounded uppercase tracking-wide bg-red-100 text-red-900">
-              expired
-            </span>
-          )}
-          <span className="text-gray-500">
+        <div className="flex shrink-0 flex-col items-end gap-1 whitespace-nowrap text-xs">
+          <StatusBadge tone="info">{row.status}</StatusBadge>
+          {expired && <StatusBadge tone="danger">expired</StatusBadge>}
+          <span className="text-ink-faint">
             {new Date(row.created_at).toLocaleString()}
           </span>
         </div>
       </div>
 
-      <dl className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs">
-        <Field label="option" value={row.selected_option_key ?? "—"} />
-        <Field
-          label="total"
-          value={row.selected_total !== null ? `$${row.selected_total}` : "—"}
+      <div className="mt-3">
+        <DetailGrid
+          columns={3}
+          items={[
+            { label: "Option", value: row.selected_option_key ?? "—" },
+            {
+              label: "Total",
+              value:
+                row.selected_total !== null ? `$${row.selected_total}` : "—",
+            },
+            {
+              label: "Expires",
+              value: new Date(row.expires_at).toLocaleDateString(),
+            },
+            { label: "Plugin version", value: row.source_plugin_version },
+          ]}
         />
-        <Field
-          label="expires"
-          value={new Date(row.expires_at).toLocaleDateString()}
-        />
-        <Field label="plugin version" value={row.source_plugin_version} />
-      </dl>
+      </div>
 
-      <div className="mt-2 text-[11px] text-gray-500 font-mono">
+      <div className="mt-2 font-mono text-[11px] text-ink-faint">
         quote {row.id.slice(0, 8)}… · lead {row.lead_id.slice(0, 8)}…
       </div>
-    </div>
-  );
-}
-
-function Field({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt className="text-gray-500 uppercase tracking-wide">{label}</dt>
-      <dd className="font-medium break-all">{value}</dd>
     </div>
   );
 }

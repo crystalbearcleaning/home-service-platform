@@ -2,7 +2,15 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
-import { readStagingToolsGate } from "@/core/staging-tools/env";
+import {
+  AdminShell,
+  EmptyState,
+  PageHeader,
+  SectionCard,
+  StatCard,
+  StatusBadge,
+  resolveAdminShellContext,
+} from "@/components/admin";
 import { SignOutButton } from "./sign-out-button";
 
 export const dynamic = "force-dynamic";
@@ -12,24 +20,25 @@ export default async function AdminPage() {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
+  if (!user) redirect("/login");
 
   const business = await getActiveBusinessForUser(user.id);
 
+  // No-business state: render a minimal panel with sign-out only —
+  // the shell needs an active business to be useful.
   if (!business) {
     return (
-      <main className="min-h-screen p-8 max-w-2xl mx-auto">
-        <header className="flex items-start justify-between mb-6">
+      <main className="mx-auto min-h-screen max-w-2xl p-8">
+        <header className="mb-6 flex items-start justify-between">
           <div>
-            <h1 className="text-2xl font-semibold">No business membership</h1>
-            <p className="text-sm text-gray-600 mt-1">{user.email}</p>
+            <h1 className="text-2xl font-semibold text-ink">
+              No business membership
+            </h1>
+            <p className="mt-1 text-sm text-ink-muted">{user.email}</p>
           </div>
           <SignOutButton />
         </header>
-        <p className="text-sm text-gray-700">
+        <p className="text-sm text-ink">
           Your account is not linked to a Crystal Bear membership. Run the
           seed script (<code>./supabase/seed/run_seed.sh</code>) after signing
           up with this email, or have an owner add you.
@@ -38,123 +47,196 @@ export default async function AdminPage() {
     );
   }
 
-  const stagingGate = readStagingToolsGate(process.env);
+  const shell = resolveAdminShellContext({
+    workspaceName: business.name,
+    userEmail: user.email ?? "—",
+  });
+
+  // Compact counts for the records summary strip. Head-only count
+  // queries — no rows returned, no business logic touched.
+  const [leadsCount, quotesCount, openTasksCount, interactionsCount] =
+    await Promise.all([
+      countRows(supabase, "leads", business.id),
+      countRows(supabase, "quotes", business.id),
+      countRows(supabase, "tasks", business.id, {
+        column: "status",
+        value: "open",
+      }),
+      countRows(supabase, "quote_page_interactions", business.id),
+    ]);
 
   return (
-    <main className="min-h-screen p-8 max-w-3xl mx-auto">
-      <header className="flex items-start justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-semibold">{business.name}</h1>
-          <p className="text-sm text-gray-600 mt-1">{user.email}</p>
+    <AdminShell
+      workspaceName={shell.workspaceName}
+      userEmail={shell.userEmail}
+      signOutSlot={<SignOutButton />}
+      stagingToolsEnabled={shell.stagingToolsEnabled}
+    >
+      <PageHeader
+        eyebrow="Overview"
+        title={`Welcome back, ${business.name}`}
+        description="Your control room. Check what needs attention, peek at recent quote-flow activity, and keep your system healthy."
+      />
+
+      <SectionCard
+        title="System overview"
+        description="Workspace identity, your sign-in, and the plugins powering this surface."
+      >
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <StatCard label="Workspace" value={business.name} />
+          <StatCard label="Slug" value={business.slug} />
+          <StatCard label="Role" value={business.roleName ?? "—"} />
+          <StatCard
+            label="App surfaces"
+            value={String(business.appSurfacesCount)}
+          />
+          <StatCard
+            label="Installed plugins"
+            value={String(business.installedPluginsCount)}
+          />
+          <StatCard label="Signed in as" value={user.email ?? "—"} />
         </div>
-        <SignOutButton />
-      </header>
-
-      <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Card label="Role" value={business.roleName ?? "—"} />
-        <Card label="Workspace slug" value={business.slug} />
-        <Card
-          label="Seeded app surfaces"
-          value={String(business.appSurfacesCount)}
-        />
-        <Card
-          label="Seeded installed plugins"
-          value={String(business.installedPluginsCount)}
-        />
-      </section>
-
-      <nav className="mt-6 text-sm flex flex-wrap gap-x-6 gap-y-2">
-        <Link
-          href="/admin/plugins"
-          className="underline text-gray-700 hover:text-black"
-        >
-          Installed plugins →
-        </Link>
-        <Link
-          href="/admin/activity"
-          className="underline text-gray-700 hover:text-black"
-        >
-          Activity →
-        </Link>
-        <Link
-          href="/admin/events"
-          className="underline text-gray-700 hover:text-black"
-        >
-          Events →
-        </Link>
-        <Link
-          href="/admin/geo-test"
-          className="underline text-gray-700 hover:text-black"
-        >
-          Geo test →
-        </Link>
-        <Link
-          href="/admin/property-data-test"
-          className="underline text-gray-700 hover:text-black"
-        >
-          Property data test →
-        </Link>
-        <Link
-          href="/admin/rate-limit-test"
-          className="underline text-gray-700 hover:text-black"
-        >
-          Rate limit test →
-        </Link>
-        <Link
-          href="/admin/auto-quote-test"
-          className="underline text-gray-700 hover:text-black"
-        >
-          Auto-Quote test →
-        </Link>
-        <Link
-          href="/admin/quote-interactions"
-          className="underline text-gray-700 hover:text-black"
-        >
-          Quote interactions →
-        </Link>
-        <Link
-          href="/admin/leads"
-          className="underline text-gray-700 hover:text-black"
-        >
-          Leads →
-        </Link>
-        <Link
-          href="/admin/quotes"
-          className="underline text-gray-700 hover:text-black"
-        >
-          Quotes →
-        </Link>
-        <Link
-          href="/admin/tasks"
-          className="underline text-gray-700 hover:text-black"
-        >
-          Tasks →
-        </Link>
-        {stagingGate.publicEnabled && (
-          <Link
-            href="/admin/staging-tools"
-            className="underline text-amber-700 hover:text-amber-900"
-          >
-            Staging tools →
-          </Link>
+        {shell.stagingToolsEnabled && (
+          <div className="mt-4 flex items-start gap-2 rounded-control border border-warning bg-warning-soft px-3 py-2 text-xs text-warning-strong">
+            <StatusBadge tone="warning" dot>
+              Staging mode
+            </StatusBadge>
+            <span>
+              Destructive reset is reachable from the Tools group. Never
+              enable in production.
+            </span>
+          </div>
         )}
-      </nav>
+      </SectionCard>
 
-      <p className="mt-10 text-xs text-gray-500">
-        Phase 1 admin shell. Read-only lists for leads / quotes / tasks
-        populated by /q submissions.
-      </p>
-    </main>
+      <div className="mt-6">
+        <SectionCard
+          title="Where things stand"
+          description="A live read of your quote-flow business records."
+        >
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatCard
+              label="Quote interactions"
+              value={String(interactionsCount)}
+              description="Anonymous /q lookups"
+            />
+            <StatCard
+              label="Leads"
+              value={String(leadsCount)}
+              description="From quote submissions"
+              tone="info"
+            />
+            <StatCard
+              label="Quotes"
+              value={String(quotesCount)}
+              description="Immutable snapshots"
+              tone="brand"
+            />
+            <StatCard
+              label="Open tasks"
+              value={String(openTasksCount)}
+              description="Things that want a look"
+              tone={openTasksCount > 0 ? "warning" : "default"}
+            />
+          </div>
+          {leadsCount === 0 &&
+            quotesCount === 0 &&
+            openTasksCount === 0 &&
+            interactionsCount === 0 && (
+              <div className="mt-4">
+                <EmptyState
+                  title="Nothing here yet"
+                  description="Once a customer submits at /q, you'll see interactions, leads, quotes, and tasks land right here."
+                  action={
+                    <Link
+                      href="/q"
+                      className="rounded-control bg-brand px-3 py-1.5 text-xs font-medium text-surface hover:bg-brand-strong"
+                    >
+                      Open /q
+                    </Link>
+                  }
+                />
+              </div>
+            )}
+        </SectionCard>
+      </div>
+
+      <div className="mt-6">
+        <SectionCard
+          title="Jump to"
+          description="Quick paths to the things you check most."
+        >
+          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <QuickLink
+              href="/admin/quote-interactions"
+              label="Review new requests"
+              hint="Every /q lookup, including out-of-area and missing-data attempts."
+            />
+            <QuickLink
+              href="/admin/leads"
+              label="See your leads"
+              hint="Customer submissions converted into business records."
+            />
+            <QuickLink
+              href="/admin/tasks"
+              label="Check what needs attention"
+              hint="Schedule follow-ups, manual quotes, and area reviews."
+            />
+            <QuickLink
+              href="/admin/plugins"
+              label="Manage your plugins"
+              hint="Installed plugins, status, and declared permissions."
+            />
+            <QuickLink
+              href="/admin/testing"
+              label="Open testing tools"
+              hint="Internal utilities for Google, RentCast, pricing, and rate limits."
+            />
+          </ul>
+        </SectionCard>
+      </div>
+    </AdminShell>
   );
 }
 
-function Card({ label, value }: { label: string; value: string }) {
+async function countRows(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: any,
+  table: string,
+  businessId: string,
+  extra?: { column: string; value: string },
+): Promise<number> {
+  let q = supabase
+    .from(table)
+    .select("id", { count: "exact", head: true })
+    .eq("business_id", businessId);
+  if (extra) q = q.eq(extra.column, extra.value);
+  const { count, error } = await q;
+  if (error) return 0;
+  return count ?? 0;
+}
+
+function QuickLink({
+  href,
+  label,
+  hint,
+}: {
+  href: string;
+  label: string;
+  hint?: string;
+}) {
   return (
-    <div className="rounded-lg border bg-white p-4">
-      <div className="text-xs uppercase tracking-wide text-gray-500">
-        {label}
-      </div>
-      <div className="text-2xl font-semibold mt-1">{value}</div>
-    </div>
+    <li>
+      <Link
+        href={href}
+        className="flex items-start justify-between gap-3 rounded-control border border-line bg-surface p-3 text-sm transition hover:border-line-strong hover:bg-surface-muted"
+      >
+        <div className="min-w-0">
+          <div className="font-medium text-ink">{label}</div>
+          {hint && <div className="mt-0.5 text-xs text-ink-muted">{hint}</div>}
+        </div>
+        <span className="shrink-0 text-ink-faint">→</span>
+      </Link>
+    </li>
   );
 }

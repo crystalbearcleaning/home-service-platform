@@ -1,8 +1,15 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
 import { summarizePhase1Event } from "@/core/events/summaries";
+import {
+  AdminShell,
+  EmptyState,
+  PageHeader,
+  SectionCard,
+  resolveAdminShellContext,
+} from "@/components/admin";
+import { SignOutButton } from "../sign-out-button";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +37,11 @@ export default async function AdminEventsPage() {
   const business = await getActiveBusinessForUser(user.id);
   if (!business) redirect("/admin");
 
+  const shell = resolveAdminShellContext({
+    workspaceName: business.name,
+    userEmail: user.email ?? "—",
+  });
+
   const { data, error } = await supabase
     .from("events")
     .select(
@@ -42,61 +54,66 @@ export default async function AdminEventsPage() {
   const events = (data ?? []) as EventRow[];
 
   return (
-    <main className="min-h-screen p-8 max-w-4xl mx-auto">
-      <Link href="/admin" className="text-sm text-gray-600 underline">
-        ← Admin
-      </Link>
-      <header className="mt-2 mb-6">
-        <h1 className="text-2xl font-semibold">Events</h1>
-        <p className="text-sm text-gray-600 mt-1">
-          {business.name} · most recent {PAGE_SIZE}
-        </p>
-      </header>
+    <AdminShell
+      workspaceName={shell.workspaceName}
+      userEmail={shell.userEmail}
+      signOutSlot={<SignOutButton />}
+      stagingToolsEnabled={shell.stagingToolsEnabled}
+    >
+      <PageHeader
+        eyebrow="Observability"
+        title="Events"
+        description={`Technical / system event log. Machine-readable counterpart to Activity. Most recent ${PAGE_SIZE}.`}
+      />
 
       {error ? (
-        <p className="text-sm text-red-600">
-          Failed to load events: {error.message}
-        </p>
+        <SectionCard>
+          <p className="text-sm text-danger-strong">
+            Failed to load events: {error.message}
+          </p>
+        </SectionCard>
       ) : events.length === 0 ? (
-        <p className="text-sm text-gray-700">
-          No events yet. They will appear here once core actions or the
-          (future) quote flow publish them.
-        </p>
+        <EmptyState
+          title="No events yet"
+          description="Events stream in once the quote flow or core actions publish them."
+        />
       ) : (
         <ul className="space-y-2">
           {events.map((row) => (
-            <li key={row.id} className="rounded border bg-white p-3 text-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="font-medium">
-                    {summarizePhase1Event(row.event_type)}
+            <li key={row.id}>
+              <SectionCard padding="tight">
+                <div className="flex items-start justify-between gap-3 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-ink">
+                      {summarizePhase1Event(row.event_type)}
+                    </div>
+                    <div className="mt-0.5 font-mono text-xs text-ink-faint">
+                      {row.event_type} v{row.schema_version} · {row.source_type}
+                      {row.source_key ? ` (${row.source_key})` : ""}
+                      {row.related_object_type
+                        ? ` · ${row.related_object_type}`
+                        : ""}
+                    </div>
                   </div>
-                  <div className="text-xs text-gray-500 mt-0.5 font-mono">
-                    {row.event_type} v{row.schema_version} · {row.source_type}
-                    {row.source_key ? ` (${row.source_key})` : ""}
-                    {row.related_object_type
-                      ? ` · ${row.related_object_type}`
-                      : ""}
+                  <div className="whitespace-nowrap font-mono text-xs text-ink-faint">
+                    {new Date(row.created_at).toLocaleString()}
                   </div>
                 </div>
-                <div className="text-xs text-gray-500 font-mono whitespace-nowrap">
-                  {new Date(row.created_at).toLocaleString()}
-                </div>
-              </div>
-              {row.payload && Object.keys(row.payload).length > 0 && (
-                <details className="mt-2">
-                  <summary className="text-xs text-gray-600 cursor-pointer">
-                    payload
-                  </summary>
-                  <pre className="mt-1 text-xs bg-gray-50 rounded p-2 overflow-x-auto">
-                    {JSON.stringify(row.payload, null, 2)}
-                  </pre>
-                </details>
-              )}
+                {row.payload && Object.keys(row.payload).length > 0 && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs text-ink-muted">
+                      payload
+                    </summary>
+                    <pre className="mt-1 overflow-x-auto rounded-control bg-surface-muted p-2 text-xs">
+                      {JSON.stringify(row.payload, null, 2)}
+                    </pre>
+                  </details>
+                )}
+              </SectionCard>
             </li>
           ))}
         </ul>
       )}
-    </main>
+    </AdminShell>
   );
 }

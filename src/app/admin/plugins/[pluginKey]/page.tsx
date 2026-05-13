@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
@@ -8,6 +7,17 @@ import type {
   PluginLoadStatus,
   PluginUiRegistration,
 } from "@/core/plugin-registry/types";
+import {
+  AdminShell,
+  DetailGrid,
+  EmptyState,
+  PageHeader,
+  SectionCard,
+  StatusBadge,
+  resolveAdminShellContext,
+  type StatusTone,
+} from "@/components/admin";
+import { SignOutButton } from "../../sign-out-button";
 
 export const dynamic = "force-dynamic";
 
@@ -29,24 +39,32 @@ export default async function PluginDetailPage({
   const business = await getActiveBusinessForUser(user.id);
   if (!business) redirect("/admin");
 
+  const shell = resolveAdminShellContext({
+    workspaceName: business.name,
+    userEmail: user.email ?? "—",
+  });
+
   const record = await getInstalledPluginRecord(business.id, pluginKey);
 
   if (!record) {
     return (
-      <main className="min-h-screen p-8 max-w-3xl mx-auto">
-        <Link
-          href="/admin/plugins"
-          className="text-sm text-gray-600 underline"
-        >
-          ← Plugins
-        </Link>
-        <h1 className="text-2xl font-semibold mt-2">Plugin not found</h1>
-        <p className="text-sm text-gray-700 mt-2">
-          No installed plugin with key{" "}
-          <code className="rounded bg-gray-100 px-1 py-0.5">{pluginKey}</code>{" "}
-          for this business.
-        </p>
-      </main>
+      <AdminShell
+        workspaceName={shell.workspaceName}
+        userEmail={shell.userEmail}
+        signOutSlot={<SignOutButton />}
+        stagingToolsEnabled={shell.stagingToolsEnabled}
+      >
+        <PageHeader eyebrow="Plugins" title="Plugin not found" />
+        <SectionCard>
+          <p className="text-sm text-ink">
+            No installed plugin with key{" "}
+            <code className="rounded bg-surface-muted px-1 py-0.5">
+              {pluginKey}
+            </code>{" "}
+            for this business.
+          </p>
+        </SectionCard>
+      </AdminShell>
     );
   }
 
@@ -61,159 +79,162 @@ export default async function PluginDetailPage({
   } = record;
 
   return (
-    <main className="min-h-screen p-8 max-w-3xl mx-auto">
-      <Link href="/admin/plugins" className="text-sm text-gray-600 underline">
-        ← Plugins
-      </Link>
+    <AdminShell
+      workspaceName={shell.workspaceName}
+      userEmail={shell.userEmail}
+      signOutSlot={<SignOutButton />}
+      stagingToolsEnabled={shell.stagingToolsEnabled}
+    >
+      <PageHeader
+        eyebrow="Plugins"
+        title={definition?.name ?? installed.pluginKey}
+        description={definition?.description ?? undefined}
+        actions={
+          <StatusBadge tone={loadStatusTone(loadStatus)}>
+            {loadStatus.replace(/_/g, " ")}
+          </StatusBadge>
+        }
+      />
 
-      <header className="mt-2 flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold">
-            {definition?.name ?? installed.pluginKey}
-          </h1>
-          <div className="text-xs text-gray-500 font-mono mt-0.5">
-            {installed.pluginKey}
-          </div>
-          {definition?.description && (
-            <p className="text-sm text-gray-700 mt-2">
-              {definition.description}
-            </p>
-          )}
-        </div>
-        <LoadStatusBadge status={loadStatus} />
-      </header>
-
-      <section className="mt-6 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-        <Stat label="Installed version" value={installed.installedVersion} />
-        <Stat
-          label="Manifest version"
-          value={definition?.manifest.version ?? "—"}
+      <SectionCard>
+        <DetailGrid
+          columns={4}
+          items={[
+            { label: "Plugin key", value: installed.pluginKey },
+            { label: "Installed version", value: installed.installedVersion },
+            {
+              label: "Manifest version",
+              value: definition?.manifest.version ?? "—",
+            },
+            { label: "Status", value: installed.status },
+            { label: "Internal", value: definition?.isInternal ? "yes" : "no" },
+          ]}
         />
-        <Stat label="Status" value={installed.status} />
-        <Stat label="Internal" value={definition?.isInternal ? "yes" : "no"} />
-      </section>
+      </SectionCard>
 
       {loadError && (
-        <section className="mt-6 rounded border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          <div className="font-semibold uppercase tracking-wide text-xs mb-1">
+        <div className="mt-6 rounded-card border border-warning bg-warning-soft p-4 text-sm text-warning-strong">
+          <div className="mb-1 text-xs font-semibold uppercase tracking-wide">
             {loadError.reason.replace(/_/g, " ")}
           </div>
           {loadError.message}
-        </section>
+        </div>
       )}
 
-      <Section title={`Permissions (${permissions.length})`}>
-        {permissions.length === 0 ? (
-          <p className="text-sm text-gray-600">No permissions declared.</p>
-        ) : (
-          <ul className="space-y-1 font-mono text-xs">
-            {permissions.map((perm) => (
-              <li key={perm} className="rounded bg-gray-50 px-2 py-1">
-                {perm}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
-
-      <Section title={`Actions (${actionRegistrations.length})`}>
-        {actionRegistrations.length === 0 ? (
-          <p className="text-sm text-gray-600">No action declarations.</p>
-        ) : (
-          <ul className="space-y-2">
-            {actionRegistrations.map((action) => (
-              <ActionRow key={action.actionKey} action={action} />
-            ))}
-          </ul>
-        )}
-      </Section>
-
-      <Section title={`UI registrations (${uiRegistrations.length})`}>
-        {uiRegistrations.length === 0 ? (
-          <p className="text-sm text-gray-600">No UI registrations.</p>
-        ) : (
-          <ul className="space-y-2">
-            {uiRegistrations.map((ui) => (
-              <UiRow key={ui.id} ui={ui} />
-            ))}
-          </ul>
-        )}
-      </Section>
-
-      <section className="mt-8 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4">
-        <h2 className="text-sm font-semibold">Analytics widgets</h2>
-        <p className="text-sm text-gray-600 mt-1">
-          Analytics widgets will be added later.
-        </p>
-      </section>
-
-      <section className="mt-4 rounded-lg border border-dashed border-gray-300 bg-gray-50 p-4">
-        <h2 className="text-sm font-semibold">Issues</h2>
-        <p className="text-sm text-gray-600 mt-1">
-          Issues will be added later.
-        </p>
-      </section>
-    </main>
-  );
-}
-
-function Section({
-  title,
-  children,
-}: {
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="mt-8">
-      <h2 className="text-xs font-semibold uppercase tracking-wide text-gray-600 mb-3">
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded border bg-white p-3">
-      <div className="text-xs uppercase tracking-wide text-gray-500">
-        {label}
+      <div className="mt-6">
+        <SectionCard title={`Permissions (${permissions.length})`}>
+          {permissions.length === 0 ? (
+            <p className="text-sm text-ink-muted">No permissions declared.</p>
+          ) : (
+            <ul className="space-y-1 font-mono text-xs">
+              {permissions.map((perm) => (
+                <li
+                  key={perm}
+                  className="rounded-control bg-surface-muted px-2 py-1"
+                >
+                  {perm}
+                </li>
+              ))}
+            </ul>
+          )}
+        </SectionCard>
       </div>
-      <div className="text-sm font-medium mt-1 break-all">{value}</div>
-    </div>
+
+      <div className="mt-6">
+        <SectionCard title={`Actions (${actionRegistrations.length})`}>
+          {actionRegistrations.length === 0 ? (
+            <p className="text-sm text-ink-muted">No action declarations.</p>
+          ) : (
+            <ul className="space-y-2">
+              {actionRegistrations.map((action) => (
+                <ActionRow key={action.actionKey} action={action} />
+              ))}
+            </ul>
+          )}
+        </SectionCard>
+      </div>
+
+      <div className="mt-6">
+        <SectionCard title={`UI registrations (${uiRegistrations.length})`}>
+          {uiRegistrations.length === 0 ? (
+            <p className="text-sm text-ink-muted">No UI registrations.</p>
+          ) : (
+            <ul className="space-y-2">
+              {uiRegistrations.map((ui) => (
+                <UiRow key={ui.id} ui={ui} />
+              ))}
+            </ul>
+          )}
+        </SectionCard>
+      </div>
+
+      <div className="mt-6">
+        <SectionCard title="Analytics widgets">
+          <EmptyState
+            title="No analytics yet"
+            description="Plugin-supplied analytics widgets will render here in a later phase."
+          />
+        </SectionCard>
+      </div>
+
+      <div className="mt-6">
+        <SectionCard title="Issues">
+          <EmptyState
+            title="No issues"
+            description="Plugin-flagged issues will appear here when the issues system lands."
+          />
+        </SectionCard>
+      </div>
+    </AdminShell>
   );
+}
+
+function loadStatusTone(status: PluginLoadStatus): StatusTone {
+  switch (status) {
+    case "ok":
+      return "success";
+    case "disabled":
+      return "default";
+    case "error":
+      return "danger";
+    case "malformed_manifest":
+    case "missing_definition":
+      return "warning";
+  }
+}
+
+function riskTone(risk: string): StatusTone {
+  switch (risk) {
+    case "low":
+      return "success";
+    case "medium":
+      return "warning";
+    case "high":
+      return "danger";
+    default:
+      return "default";
+  }
 }
 
 function ActionRow({ action }: { action: PluginActionRegistration }) {
   return (
-    <li className="rounded border bg-white p-3">
+    <li className="rounded-card border border-line bg-surface p-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="font-medium text-sm">{action.name}</div>
-          <div className="text-xs text-gray-500 font-mono mt-0.5">
+          <div className="text-sm font-medium text-ink">{action.name}</div>
+          <div className="mt-0.5 font-mono text-xs text-ink-faint">
             {action.actionKey}
           </div>
           {action.description && (
-            <p className="text-sm text-gray-700 mt-2">{action.description}</p>
+            <p className="mt-2 text-sm text-ink-muted">{action.description}</p>
           )}
         </div>
         <div className="flex flex-col items-end gap-1 text-xs">
-          <span
-            className={`px-2 py-0.5 rounded ${
-              action.riskLevel === "low"
-                ? "bg-green-50 text-green-800"
-                : action.riskLevel === "medium"
-                  ? "bg-yellow-50 text-yellow-800"
-                  : "bg-red-50 text-red-800"
-            }`}
-          >
+          <StatusBadge tone={riskTone(action.riskLevel)}>
             {action.riskLevel}
-          </span>
+          </StatusBadge>
           {action.requiresApproval && (
-            <span className="px-2 py-0.5 rounded bg-gray-200 text-gray-800">
-              requires approval
-            </span>
+            <StatusBadge tone="default">requires approval</StatusBadge>
           )}
         </div>
       </div>
@@ -223,44 +244,22 @@ function ActionRow({ action }: { action: PluginActionRegistration }) {
 
 function UiRow({ ui }: { ui: PluginUiRegistration }) {
   return (
-    <li className="rounded border bg-white p-3">
+    <li className="rounded-card border border-line bg-surface p-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="font-medium text-sm">{ui.uiKey}</div>
-          <div className="text-xs text-gray-500 font-mono mt-0.5">
+          <div className="text-sm font-medium text-ink">{ui.uiKey}</div>
+          <div className="mt-0.5 font-mono text-xs text-ink-faint">
             {ui.surfaceType} · {ui.slot}
           </div>
-          <div className="text-xs text-gray-500 mt-1">
-            component: <span className="font-mono">{ui.componentKey}</span>
+          <div className="mt-1 text-xs text-ink-muted">
+            component:{" "}
+            <span className="font-mono text-ink">{ui.componentKey}</span>
           </div>
         </div>
-        <span
-          className={`text-xs px-2 py-0.5 rounded ${
-            ui.isEnabled
-              ? "bg-green-50 text-green-800"
-              : "bg-gray-100 text-gray-700"
-          }`}
-        >
+        <StatusBadge tone={ui.isEnabled ? "success" : "default"}>
           {ui.isEnabled ? "enabled" : "disabled"}
-        </span>
+        </StatusBadge>
       </div>
     </li>
-  );
-}
-
-function LoadStatusBadge({ status }: { status: PluginLoadStatus }) {
-  const classes: Record<PluginLoadStatus, string> = {
-    ok: "bg-green-100 text-green-800",
-    disabled: "bg-gray-200 text-gray-800",
-    error: "bg-red-100 text-red-800",
-    malformed_manifest: "bg-amber-100 text-amber-900",
-    missing_definition: "bg-amber-100 text-amber-900",
-  };
-  return (
-    <span
-      className={`text-xs px-2 py-0.5 rounded uppercase tracking-wide ${classes[status]}`}
-    >
-      {status.replace(/_/g, " ")}
-    </span>
   );
 }

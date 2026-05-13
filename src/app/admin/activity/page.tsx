@@ -1,7 +1,14 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
+import {
+  AdminShell,
+  EmptyState,
+  PageHeader,
+  SectionCard,
+  resolveAdminShellContext,
+} from "@/components/admin";
+import { SignOutButton } from "../sign-out-button";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +36,11 @@ export default async function AdminActivityPage() {
   const business = await getActiveBusinessForUser(user.id);
   if (!business) redirect("/admin");
 
+  const shell = resolveAdminShellContext({
+    workspaceName: business.name,
+    userEmail: user.email ?? "—",
+  });
+
   const { data, error } = await supabase
     .from("activities")
     .select(
@@ -41,52 +53,57 @@ export default async function AdminActivityPage() {
   const activities = (data ?? []) as ActivityRow[];
 
   return (
-    <main className="min-h-screen p-8 max-w-4xl mx-auto">
-      <Link href="/admin" className="text-sm text-gray-600 underline">
-        ← Admin
-      </Link>
-      <header className="mt-2 mb-6">
-        <h1 className="text-2xl font-semibold">Activity</h1>
-        <p className="text-sm text-gray-600 mt-1">
-          {business.name} · most recent {PAGE_SIZE}
-        </p>
-      </header>
+    <AdminShell
+      workspaceName={shell.workspaceName}
+      userEmail={shell.userEmail}
+      signOutSlot={<SignOutButton />}
+      stagingToolsEnabled={shell.stagingToolsEnabled}
+    >
+      <PageHeader
+        eyebrow="Observability"
+        title="Activity"
+        description={`Human-readable history of submissions, lead creations, and plugin actions. Most recent ${PAGE_SIZE}.`}
+      />
 
       {error ? (
-        <p className="text-sm text-red-600">
-          Failed to load activities: {error.message}
-        </p>
+        <SectionCard>
+          <p className="text-sm text-danger-strong">
+            Failed to load activities: {error.message}
+          </p>
+        </SectionCard>
       ) : activities.length === 0 ? (
-        <p className="text-sm text-gray-700">
-          No activities yet. They will appear here as core actions and the
-          (future) quote flow log them.
-        </p>
+        <EmptyState
+          title="No activity yet"
+          description="Activity rolls in as the quote flow runs and plugins log what they do."
+        />
       ) : (
-        <ul className="divide-y rounded border bg-white">
-          {activities.map((row) => (
-            <li
-              key={row.id}
-              className="p-3 text-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
-            >
-              <div>
-                <div className="font-medium">{row.summary}</div>
-                <div className="text-xs text-gray-500 mt-0.5 font-mono">
-                  {row.activity_type} · {row.actor_type}
-                  {row.source_plugin_key
-                    ? ` · ${row.source_plugin_key}`
-                    : ""}
-                  {row.related_object_type
-                    ? ` · ${row.related_object_type}`
-                    : ""}
+        <SectionCard padding="none">
+          <ul className="divide-y divide-line">
+            {activities.map((row) => (
+              <li
+                key={row.id}
+                className="flex flex-col gap-2 p-4 text-sm sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <div className="font-medium text-ink">{row.summary}</div>
+                  <div className="mt-0.5 font-mono text-xs text-ink-faint">
+                    {row.activity_type} · {row.actor_type}
+                    {row.source_plugin_key
+                      ? ` · ${row.source_plugin_key}`
+                      : ""}
+                    {row.related_object_type
+                      ? ` · ${row.related_object_type}`
+                      : ""}
+                  </div>
                 </div>
-              </div>
-              <div className="text-xs text-gray-500 font-mono whitespace-nowrap">
-                {new Date(row.created_at).toLocaleString()}
-              </div>
-            </li>
-          ))}
-        </ul>
+                <div className="shrink-0 whitespace-nowrap font-mono text-xs text-ink-faint">
+                  {new Date(row.created_at).toLocaleString()}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </SectionCard>
       )}
-    </main>
+    </AdminShell>
   );
 }

@@ -1,7 +1,13 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
+import {
+  AdminShell,
+  PageHeader,
+  SectionCard,
+  resolveAdminShellContext,
+} from "@/components/admin";
+import { SignOutButton } from "../sign-out-button";
 import { GeoTestClient } from "./geo-test-client";
 
 export const dynamic = "force-dynamic";
@@ -16,29 +22,35 @@ export default async function GeoTestPage() {
   const business = await getActiveBusinessForUser(user.id);
   if (!business) redirect("/admin");
 
+  const shell = resolveAdminShellContext({
+    workspaceName: business.name,
+    userEmail: user.email ?? "—",
+  });
+
   return (
-    <main className="min-h-screen p-8 max-w-3xl mx-auto">
-      <Link href="/admin" className="text-sm text-gray-600 underline">
-        ← Admin
-      </Link>
-      <header className="mt-2 mb-6">
-        <h1 className="text-2xl font-semibold">Geo test</h1>
-        <p className="text-sm text-gray-600 mt-1">
-          Internal: exercise the core geo provider (Google Places + service
-          area match) without touching the quote flow.
-        </p>
-        <p className="text-xs text-gray-500 mt-2">
-          {business.name} · service areas seeded: Boynton Beach, Boca Raton,
-          Delray Beach.
-        </p>
-      </header>
+    <AdminShell
+      workspaceName={shell.workspaceName}
+      userEmail={shell.userEmail}
+      signOutSlot={<SignOutButton />}
+      stagingToolsEnabled={shell.stagingToolsEnabled}
+    >
+      <PageHeader
+        eyebrow="Testing tools"
+        title="Geo test"
+        description="Exercise the core geo provider (Google Places + service-area match) without touching the quote flow."
+      />
+      <p className="mb-4 text-xs text-ink-faint">
+        Service areas seeded: Boynton Beach, Boca Raton, Delray Beach.
+      </p>
 
-      <GeoTestClient />
+      <SectionCard>
+        <GeoTestClient />
+      </SectionCard>
 
-      <p className="mt-10 text-xs text-gray-500">
+      <p className="mt-6 text-xs text-ink-faint">
         This page does not create contacts, properties, leads, quotes,
         tasks, events, or activities. It only reads service_areas.
       </p>
-    </main>
+    </AdminShell>
   );
 }

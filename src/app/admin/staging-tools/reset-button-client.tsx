@@ -46,17 +46,16 @@ export function ResetButtonClient() {
 
   if (state.kind === "done") {
     return (
-      <div className="rounded-lg border border-green-200 bg-green-50 p-4 text-sm">
-        <p className="font-medium text-green-900">Reset complete.</p>
-        <p className="text-xs text-green-900 mt-1">
-          business <code className="font-mono">{state.businessId.slice(0, 8)}…</code>
+      <div className="rounded-card border border-success bg-success-soft p-4 text-sm">
+        <p className="font-medium text-success-strong">Reset complete.</p>
+        <p className="mt-1 text-xs text-success-strong">
+          business{" "}
+          <code className="font-mono">{state.businessId.slice(0, 8)}…</code>
         </p>
-        <dl className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1 text-xs text-green-900">
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-success-strong sm:grid-cols-3">
           {Object.entries(state.counts).map(([table, count]) => (
             <div key={table}>
-              <dt className="text-green-800/80 uppercase tracking-wide">
-                {table}
-              </dt>
+              <dt className="uppercase tracking-wide opacity-80">{table}</dt>
               <dd className="font-medium">{count}</dd>
             </div>
           ))}
@@ -67,7 +66,7 @@ export function ResetButtonClient() {
             setState({ kind: "idle" });
             setTyped("");
           }}
-          className="mt-3 text-xs underline"
+          className="mt-3 text-xs text-success-strong underline"
         >
           Run again
         </button>
@@ -76,14 +75,14 @@ export function ResetButtonClient() {
   }
 
   return (
-    <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm space-y-3">
+    <div className="space-y-3 rounded-card border border-danger bg-danger-soft p-4 text-sm">
       <div>
-        <p className="font-semibold text-red-900">
+        <p className="font-semibold text-danger-strong">
           Destructive: this deletes quote-flow test data.
         </p>
-        <p className="text-xs text-red-900 mt-1">
+        <p className="mt-1 text-xs text-danger-strong">
           Type{" "}
-          <code className="font-mono bg-white border border-red-200 rounded px-1">
+          <code className="rounded border border-danger bg-surface px-1 font-mono">
             {REQUIRED_CONFIRMATION}
           </code>{" "}
           below, then click Reset.
@@ -96,7 +95,7 @@ export function ResetButtonClient() {
         onChange={(e) => setTyped(e.target.value)}
         disabled={state.kind === "running"}
         placeholder={REQUIRED_CONFIRMATION}
-        className="w-full rounded border border-red-300 bg-white px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-red-200 disabled:opacity-60"
+        className="w-full rounded-control border border-danger bg-surface px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-danger/30 disabled:opacity-60"
         autoComplete="off"
         spellCheck={false}
       />
@@ -107,15 +106,13 @@ export function ResetButtonClient() {
         disabled={
           typed.trim() !== REQUIRED_CONFIRMATION || state.kind === "running"
         }
-        className="w-full rounded-lg bg-red-700 text-white py-2 text-sm font-medium disabled:opacity-40"
+        className="w-full rounded-control bg-danger py-2 text-sm font-medium text-surface transition hover:bg-danger-strong disabled:opacity-40"
       >
-        {state.kind === "running"
-          ? "Resetting…"
-          : "Reset quote-flow data"}
+        {state.kind === "running" ? "Resetting…" : "Reset quote-flow data"}
       </button>
 
       {state.kind === "error" && (
-        <p className="text-xs text-red-700 bg-white border border-red-200 rounded p-2">
+        <p className="rounded-control border border-danger bg-surface p-2 text-xs text-danger-strong">
           {state.message}
         </p>
       )}

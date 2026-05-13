@@ -21,9 +21,22 @@ Read those before extending the platform.
 
 ## Status
 
-This is the **Step A1 scaffold**. The repo structure, tooling, and
-documentation are in place. No business logic, Supabase migrations, plugin
-code, or quote flow has been implemented yet.
+Phase 1 is **complete** — see `docs/PHASE_1_QA_REPORT.md` for the
+sign-off. The customer quote app (`/q`), admin shell scaffold, plugin
+registry, observability foundation, and staging reset are all in place
+and tested.
+
+Phase 2 is the **Admin reorganization + design-system** phase. It does
+not add new features — it reorganizes the existing admin into a single
+consistent shell with shared components and a theme-ready foundation.
+The source-of-truth design doc for Phase 2 is:
+
+- `docs/PHASE_2_ADMIN_ORGANIZATION_AND_DESIGN.md`
+
+Future `/admin/*` pages must use the shared shell + components defined
+in that doc. No business logic, server actions, or schema changes are
+allowed in Phase 2; if a task seems to require any of those, stop and
+ask first.
 
 ---
 
