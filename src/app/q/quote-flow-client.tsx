@@ -7,10 +7,8 @@ import {
 } from "@/components/google-autocomplete";
 // IMPORTANT: import from specific files, not the plugin barrel
 // (`@/plugins/customer-quote-sales-page`), because that barrel re-exports
-// server-only modules (address-lookup.ts, interactions.ts, context.ts).
-// The value imports below would otherwise pull those into the browser
-// bundle and trigger the "You're importing a component that needs
-// server-only" build error.
+// server-only modules. Pulling the barrel into a Client Component would
+// trigger Next.js' "server-only" build guard.
 import {
   canSchedule,
   computeSelectedTotal,
@@ -22,18 +20,31 @@ import type {
   CustomerQuotePageContext,
   TrackingContext,
 } from "@/plugins/customer-quote-sales-page/types";
+import {
+  validateContactForm,
+  type SubmitContactResult,
+  type SubmitContactSuccess,
+} from "@/plugins/customer-quote-sales-page/submit-mapping";
 import type {
   OptionKey,
   QuoteAddOn,
   QuoteOption,
   QuoteOutput,
 } from "@/plugins/window-cleaning-auto-quote/types";
-import { lookupAddressForQuoteAction } from "./actions";
+import {
+  lookupAddressForQuoteAction,
+  submitContactForQuoteAction,
+} from "./actions";
 
 type State =
   | { kind: "idle" }
   | { kind: "looking_up"; place: SelectedPlace }
-  | { kind: "result"; place: SelectedPlace; result: AddressLookupResult };
+  | { kind: "result"; place: SelectedPlace; result: AddressLookupResult }
+  | {
+      kind: "confirmed";
+      place: SelectedPlace;
+      success: SubmitContactSuccess;
+    };
 
 type Props = {
   context: CustomerQuotePageContext;
@@ -93,6 +104,13 @@ export function QuoteFlowClient({ context }: Props) {
     setState({ kind: "result", place, result });
   }, []);
 
+  const handleConfirmed = useCallback(
+    (place: SelectedPlace, success: SubmitContactSuccess) => {
+      setState({ kind: "confirmed", place, success });
+    },
+    [],
+  );
+
   const headlineSubtitle =
     "Get an instant exterior window cleaning quote — no calls, no callbacks.";
 
@@ -123,7 +141,16 @@ export function QuoteFlowClient({ context }: Props) {
       )}
 
       {state.kind === "result" && (
-        <ResultArea context={context} place={state.place} result={state.result} />
+        <ResultArea
+          context={context}
+          place={state.place}
+          result={state.result}
+          onConfirmed={handleConfirmed}
+        />
+      )}
+
+      {state.kind === "confirmed" && (
+        <ConfirmationPanel context={context} success={state.success} />
       )}
 
       <TrustSection points={context.copy.customer_quote_trust_points} />
@@ -136,10 +163,12 @@ function ResultArea({
   context,
   place,
   result,
+  onConfirmed,
 }: {
   context: CustomerQuotePageContext;
   place: SelectedPlace;
   result: AddressLookupResult;
+  onConfirmed: (place: SelectedPlace, success: SubmitContactSuccess) => void;
 }) {
   if (!result.ok) {
     if (result.error.code === "RATE_LIMITED") {
@@ -166,27 +195,36 @@ function ResultArea({
   }
 
   const data = result.data;
+  const formattedAddress = data.formattedAddress || place.formattedAddress;
 
   if (data.kind === "out_of_area") {
     return (
-      <FallbackCard
-        tone="amber"
+      <FallbackWithContactForm
+        context={context}
+        kind="out_of_area"
+        place={place}
+        interactionId={data.interactionId}
+        formattedAddress={formattedAddress}
         title="Out of service area"
         primary={context.copy.fallback_out_of_service_area}
         contactStepMessage={data.contactStepMessage}
-        formattedAddress={data.formattedAddress || place.formattedAddress}
+        onConfirmed={onConfirmed}
       />
     );
   }
 
   if (data.kind === "property_data_missing") {
     return (
-      <FallbackCard
-        tone="amber"
+      <FallbackWithContactForm
+        context={context}
+        kind="property_data_missing"
+        place={place}
+        interactionId={data.interactionId}
+        formattedAddress={formattedAddress}
         title="Property details unavailable"
         primary={context.copy.fallback_property_data_missing}
         contactStepMessage={data.contactStepMessage}
-        formattedAddress={data.formattedAddress || place.formattedAddress}
+        onConfirmed={onConfirmed}
       />
     );
   }
@@ -194,52 +232,237 @@ function ResultArea({
   return (
     <QuoteResultCard
       context={context}
-      formattedAddress={data.formattedAddress || place.formattedAddress}
+      place={place}
+      interactionId={data.interactionId}
+      formattedAddress={formattedAddress}
       quote={data.quotePreview}
+      onConfirmed={onConfirmed}
     />
   );
 }
 
-function FallbackCard({
-  tone,
+// -------------------------------------------------------------------------
+// Contact form (used both inline below the quote cards and as the
+// fallback path for property_data_missing / out_of_area).
+// -------------------------------------------------------------------------
+
+type ContactFormProps = {
+  submitLabel: string;
+  busy: boolean;
+  errorMessage: string | null;
+  onSubmit: (input: { fullName: string; phone: string; email: string }) => void;
+};
+
+function ContactForm({
+  submitLabel,
+  busy,
+  errorMessage,
+  onSubmit,
+}: ContactFormProps) {
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const v = validateContactForm({ fullName, phone, email });
+    if (!v.ok) {
+      setLocalError(v.error.message);
+      return;
+    }
+    setLocalError(null);
+    onSubmit(v.data);
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3 mt-4" noValidate>
+      <div>
+        <label className="text-xs text-gray-600" htmlFor="cf-name">
+          Full name
+        </label>
+        <input
+          id="cf-name"
+          type="text"
+          autoComplete="name"
+          required
+          value={fullName}
+          onChange={(e) => setFullName(e.target.value)}
+          disabled={busy}
+          className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/10 disabled:bg-gray-50"
+        />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="text-xs text-gray-600" htmlFor="cf-phone">
+            Phone
+          </label>
+          <input
+            id="cf-phone"
+            type="tel"
+            autoComplete="tel"
+            required
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            disabled={busy}
+            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/10 disabled:bg-gray-50"
+          />
+        </div>
+        <div>
+          <label className="text-xs text-gray-600" htmlFor="cf-email">
+            Email
+          </label>
+          <input
+            id="cf-email"
+            type="email"
+            autoComplete="email"
+            required
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={busy}
+            className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-black/10 disabled:bg-gray-50"
+          />
+        </div>
+      </div>
+
+      {(localError || errorMessage) && (
+        <p className="text-xs text-red-600">{localError ?? errorMessage}</p>
+      )}
+
+      <button
+        type="submit"
+        disabled={busy}
+        className="w-full rounded-lg bg-black text-white py-3 text-sm font-medium disabled:opacity-40"
+      >
+        {busy ? "Sending…" : submitLabel}
+      </button>
+    </form>
+  );
+}
+
+// -------------------------------------------------------------------------
+// Fallback card variants (property_data_missing / out_of_area). In C3
+// they reveal the contact form inline beneath the explanation.
+// -------------------------------------------------------------------------
+
+function FallbackWithContactForm({
+  context,
+  kind,
+  place,
+  interactionId,
+  formattedAddress,
   title,
   primary,
   contactStepMessage,
-  formattedAddress,
+  onConfirmed,
 }: {
-  tone: "amber" | "red";
+  context: CustomerQuotePageContext;
+  kind: "property_data_missing" | "out_of_area";
+  place: SelectedPlace;
+  interactionId: string;
+  formattedAddress: string;
   title: string;
   primary: string;
   contactStepMessage: string;
-  formattedAddress: string;
+  onConfirmed: (place: SelectedPlace, success: SubmitContactSuccess) => void;
 }) {
-  const cls =
-    tone === "amber"
-      ? "border-amber-200 bg-amber-50 text-amber-900"
-      : "border-red-200 bg-red-50 text-red-900";
+  const [formOpen, setFormOpen] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  async function handleSubmit(input: {
+    fullName: string;
+    phone: string;
+    email: string;
+  }) {
+    setBusy(true);
+    setErrorMessage(null);
+    let result: SubmitContactResult;
+    try {
+      result = await submitContactForQuoteAction({
+        interactionId,
+        contact: input,
+        selection: {
+          selectedOptionKey: null,
+          interiorAddOnSelected: false,
+          selectedTotal: null,
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      result = {
+        ok: false,
+        error: {
+          code: "INTERNAL",
+          message: `Could not reach the submission service: ${message}`,
+        },
+      };
+    }
+    setBusy(false);
+    if (!result.ok) {
+      setErrorMessage(result.error.message);
+      return;
+    }
+    setFormOpen(false);
+    onConfirmed(place, result.data);
+  }
+
   return (
-    <div className={`rounded-lg border p-5 text-sm ${cls}`}>
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
       <div className="text-xs uppercase tracking-wide font-semibold">{title}</div>
-      <div className="text-sm font-medium mt-1 break-all">
+      <div className="text-sm font-medium mt-1 break-all text-gray-900">
         {formattedAddress}
       </div>
       <p className="mt-3">{primary}</p>
       <p className="mt-3 text-xs italic">{contactStepMessage}</p>
+
+      {formOpen && (
+        <div className="mt-4 rounded bg-white border border-amber-200 p-4">
+          <ContactForm
+            submitLabel={
+              kind === "out_of_area"
+                ? "Send Address for Review"
+                : "Request My Quote"
+            }
+            busy={busy}
+            errorMessage={errorMessage}
+            onSubmit={handleSubmit}
+          />
+          <p className="mt-2 text-[11px] text-gray-500">
+            We&rsquo;ll only use this to follow up.{" "}
+            {context.business.phone
+              ? `Prefer to talk? Call ${context.business.phone}.`
+              : null}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
 
+// -------------------------------------------------------------------------
+// Quote result card with selection + inline contact form on CTA click.
+// -------------------------------------------------------------------------
+
 function QuoteResultCard({
   context,
+  place,
+  interactionId,
   formattedAddress,
   quote,
+  onConfirmed,
 }: {
   context: CustomerQuotePageContext;
+  place: SelectedPlace;
+  interactionId: string;
   formattedAddress: string;
   quote: QuoteOutput;
+  onConfirmed: (place: SelectedPlace, success: SubmitContactSuccess) => void;
 }) {
   const [selection, setSelection] = useState<SelectionState>(INITIAL_SELECTION);
-  const [ctaMessage, setCtaMessage] = useState<string | null>(null);
+  const [contactOpen, setContactOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const interiorAddOn = quote.add_ons[0];
 
@@ -257,12 +480,12 @@ function QuoteResultCard({
   // Reset selection if the quote changes (e.g., user picked a new address).
   useEffect(() => {
     setSelection(INITIAL_SELECTION);
-    setCtaMessage(null);
+    setContactOpen(false);
+    setErrorMessage(null);
   }, [quote]);
 
   function pickOption(key: OptionKey) {
     setSelection((prev) => ({ ...prev, selectedOptionKey: key }));
-    setCtaMessage(null);
   }
 
   function toggleInterior() {
@@ -273,7 +496,45 @@ function QuoteResultCard({
   }
 
   function handleScheduleClick() {
-    setCtaMessage("Contact step will be added next.");
+    if (!canSchedule(selection)) return;
+    setContactOpen(true);
+    setErrorMessage(null);
+  }
+
+  async function handleSubmit(input: {
+    fullName: string;
+    phone: string;
+    email: string;
+  }) {
+    setBusy(true);
+    setErrorMessage(null);
+    let result: SubmitContactResult;
+    try {
+      result = await submitContactForQuoteAction({
+        interactionId,
+        contact: input,
+        selection: {
+          selectedOptionKey: selection.selectedOptionKey,
+          interiorAddOnSelected: selection.interiorAddOnSelected,
+          selectedTotal,
+        },
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      result = {
+        ok: false,
+        error: {
+          code: "INTERNAL",
+          message: `Could not reach the submission service: ${message}`,
+        },
+      };
+    }
+    setBusy(false);
+    if (!result.ok) {
+      setErrorMessage(result.error.message);
+      return;
+    }
+    onConfirmed(place, result.data);
   }
 
   return (
@@ -292,6 +553,7 @@ function QuoteResultCard({
             option={option}
             selected={selection.selectedOptionKey === option.option_key}
             onSelect={() => pickOption(option.option_key)}
+            disabled={contactOpen}
           />
         ))}
       </ul>
@@ -302,6 +564,7 @@ function QuoteResultCard({
             type="checkbox"
             checked={selection.interiorAddOnSelected}
             onChange={toggleInterior}
+            disabled={contactOpen}
             className="mt-0.5"
           />
           <span>
@@ -329,18 +592,31 @@ function QuoteResultCard({
         </p>
       </div>
 
-      <button
-        type="button"
-        onClick={handleScheduleClick}
-        disabled={!canSchedule(selection)}
-        className="w-full rounded-lg bg-black text-white py-3 text-sm font-medium disabled:opacity-40"
-      >
-        Schedule My Cleaning
-      </button>
+      {!contactOpen && (
+        <button
+          type="button"
+          onClick={handleScheduleClick}
+          disabled={!canSchedule(selection)}
+          className="w-full rounded-lg bg-black text-white py-3 text-sm font-medium disabled:opacity-40"
+        >
+          Schedule My Cleaning
+        </button>
+      )}
 
-      {ctaMessage && (
-        <div className="rounded border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
-          {ctaMessage}
+      {contactOpen && (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <h3 className="text-sm font-medium text-gray-900">
+            Send your scheduling request
+          </h3>
+          <p className="text-xs text-gray-600 mt-1">
+            We&rsquo;ll follow up to confirm a time that works for you.
+          </p>
+          <ContactForm
+            submitLabel="Request Scheduling"
+            busy={busy}
+            errorMessage={errorMessage}
+            onSubmit={handleSubmit}
+          />
         </div>
       )}
 
@@ -359,10 +635,12 @@ function OptionCard({
   option,
   selected,
   onSelect,
+  disabled,
 }: {
   option: QuoteOption;
   selected: boolean;
   onSelect: () => void;
+  disabled?: boolean;
 }) {
   return (
     <li>
@@ -370,11 +648,12 @@ function OptionCard({
         type="button"
         onClick={onSelect}
         aria-pressed={selected}
+        disabled={disabled}
         className={`w-full text-left rounded-lg border p-4 transition ${
           selected
             ? "border-black ring-2 ring-black/10 bg-white"
             : "border-gray-200 bg-white hover:border-gray-400"
-        }`}
+        } disabled:opacity-60`}
       >
         <div className="flex items-center justify-between gap-2">
           <span className="text-sm font-medium">{option.display_label}</span>
@@ -390,16 +669,93 @@ function OptionCard({
   );
 }
 
+// -------------------------------------------------------------------------
+// Confirmation panel — shown after a successful submission.
+// -------------------------------------------------------------------------
+
+function ConfirmationPanel({
+  context,
+  success,
+}: {
+  context: CustomerQuotePageContext;
+  success: SubmitContactSuccess;
+}) {
+  const phone = context.business.phone;
+  const isQuote = success.kind === "quote_generated";
+
+  return (
+    <section className="rounded-lg border border-green-200 bg-green-50 p-5">
+      <h2 className="text-base font-semibold text-green-900">Thanks!</h2>
+
+      {isQuote ? (
+        <>
+          <p className="mt-2 text-sm text-green-900">
+            We received your scheduling request for{" "}
+            <span className="font-medium break-all">{success.formattedAddress}</span>
+            .
+          </p>
+          <dl className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-green-900">
+            <Detail label="Selected option" value={success.selectedOptionKey ?? "—"} />
+            <Detail
+              label="Total"
+              value={
+                success.selectedTotal !== null
+                  ? `$${success.selectedTotal}`
+                  : "—"
+              }
+            />
+          </dl>
+          <p className="mt-3 text-sm text-green-900">
+            This quote is valid for {success.quoteValidDays} days. Our team
+            will follow up to confirm a time that works for you.
+          </p>
+        </>
+      ) : success.kind === "property_data_missing" ? (
+        <p className="mt-2 text-sm text-green-900">
+          We&rsquo;ll prepare your quote and follow up soon at{" "}
+          <span className="font-medium break-all">{success.formattedAddress}</span>
+          .
+        </p>
+      ) : (
+        <p className="mt-2 text-sm text-green-900">
+          We&rsquo;ll review your address and let you know if we can help.
+        </p>
+      )}
+
+      {phone && (
+        <p className="mt-3 text-xs text-green-900">
+          Need a faster answer?{" "}
+          <a href={`tel:${phone}`} className="font-medium underline">
+            Call {phone}
+          </a>
+          .
+        </p>
+      )}
+    </section>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs uppercase tracking-wide text-green-800/80">
+        {label}
+      </dt>
+      <dd className="font-medium">{value}</dd>
+    </div>
+  );
+}
+
 function TrustSection({ points }: { points: string[] }) {
   return (
     <section className="rounded-lg border bg-white p-5">
-      <h2 className="text-base font-medium text-gray-900">
-        What you get
-      </h2>
+      <h2 className="text-base font-medium text-gray-900">What you get</h2>
       <ul className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm text-gray-700">
         {points.map((point) => (
           <li key={point} className="flex items-start gap-2">
-            <span aria-hidden="true" className="text-green-600">✓</span>
+            <span aria-hidden="true" className="text-green-600">
+              ✓
+            </span>
             <span>{point}</span>
           </li>
         ))}

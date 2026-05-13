@@ -17,8 +17,11 @@ type Row = {
   google_place_id: string | null;
   selected_option_key: string | null;
   selected_total: number | null;
+  converted_contact_id: string | null;
+  converted_property_id: string | null;
   converted_lead_id: string | null;
   converted_quote_id: string | null;
+  converted_at: string | null;
   quote_preview_data: {
     price_snapshot?: {
       options?: Record<string, number>;
@@ -44,7 +47,7 @@ export default async function QuoteInteractionsPage() {
   const { data, error } = await supabase
     .from("quote_page_interactions")
     .select(
-      "id, created_at, interaction_status, service_area_status, property_data_status, normalized_city, google_place_id, selected_option_key, selected_total, converted_lead_id, converted_quote_id, quote_preview_data, normalized_address, address_input",
+      "id, created_at, interaction_status, service_area_status, property_data_status, normalized_city, google_place_id, selected_option_key, selected_total, converted_contact_id, converted_property_id, converted_lead_id, converted_quote_id, converted_at, quote_preview_data, normalized_address, address_input",
     )
     .eq("business_id", business.id)
     .order("created_at", { ascending: false })
@@ -100,7 +103,11 @@ function InteractionRow({ row }: { row: Row }) {
   const previewInterior =
     row.quote_preview_data?.price_snapshot?.add_ons?.interior_window_cleaning;
 
-  const converted = Boolean(row.converted_lead_id || row.converted_quote_id);
+  const converted = Boolean(
+    row.converted_contact_id ||
+      row.converted_lead_id ||
+      row.converted_quote_id,
+  );
 
   return (
     <div className="rounded border bg-white p-4 text-sm">
@@ -131,10 +138,13 @@ function InteractionRow({ row }: { row: Row }) {
           label="selected total"
           value={row.selected_total !== null ? `$${row.selected_total}` : "—"}
         />
-        <Field
-          label="converted"
-          value={converted ? "yes" : "no"}
-        />
+        <Field label="converted" value={converted ? "yes" : "no"} />
+        {row.converted_at && (
+          <Field
+            label="converted at"
+            value={new Date(row.converted_at).toLocaleString()}
+          />
+        )}
         {previewOptions && (
           <Field
             label="preview prices"
@@ -146,6 +156,57 @@ function InteractionRow({ row }: { row: Row }) {
           />
         )}
       </dl>
+
+      {converted && (
+        <dl className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-[11px] border-t pt-3">
+          {row.converted_contact_id && (
+            <IdLink label="contact" id={row.converted_contact_id} />
+          )}
+          {row.converted_property_id && (
+            <IdLink label="property" id={row.converted_property_id} />
+          )}
+          {row.converted_lead_id && (
+            <IdLink
+              label="lead"
+              id={row.converted_lead_id}
+              href={`/admin/leads`}
+            />
+          )}
+          {row.converted_quote_id && (
+            <IdLink
+              label="quote"
+              id={row.converted_quote_id}
+              href={`/admin/quotes`}
+            />
+          )}
+        </dl>
+      )}
+    </div>
+  );
+}
+
+function IdLink({
+  label,
+  id,
+  href,
+}: {
+  label: string;
+  id: string;
+  href?: string;
+}) {
+  const short = `${id.slice(0, 8)}…`;
+  return (
+    <div className="flex items-center gap-2">
+      <dt className="text-gray-500 uppercase tracking-wide">{label}</dt>
+      <dd className="font-mono">
+        {href ? (
+          <Link href={href} className="underline" title={id}>
+            {short}
+          </Link>
+        ) : (
+          <span title={id}>{short}</span>
+        )}
+      </dd>
     </div>
   );
 }

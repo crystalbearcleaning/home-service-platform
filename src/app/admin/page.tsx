@@ -109,11 +109,29 @@ export default async function AdminPage() {
         >
           Quote interactions →
         </Link>
+        <Link
+          href="/admin/leads"
+          className="underline text-gray-700 hover:text-black"
+        >
+          Leads →
+        </Link>
+        <Link
+          href="/admin/quotes"
+          className="underline text-gray-700 hover:text-black"
+        >
+          Quotes →
+        </Link>
+        <Link
+          href="/admin/tasks"
+          className="underline text-gray-700 hover:text-black"
+        >
+          Tasks →
+        </Link>
       </nav>
 
       <p className="mt-10 text-xs text-gray-500">
-        Phase 1 admin shell. Dashboard widgets, leads, quotes, and tasks
-        will be added in later steps.
+        Phase 1 admin shell. Read-only lists for leads / quotes / tasks
+        populated by /q submissions.
       </p>
     </main>
   );

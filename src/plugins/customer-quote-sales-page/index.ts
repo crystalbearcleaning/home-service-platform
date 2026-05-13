@@ -14,6 +14,7 @@ export { lookupAddressAndPreview } from "./address-lookup";
 export { recordQuotePageInteraction } from "./interactions";
 export { loadCustomerQuotePageContext } from "./context";
 export { decideOutcome } from "./outcome";
+export { submitContactAndConvert } from "./submit-contact";
 export {
   computeSelectedTotal,
   canSchedule,
@@ -38,3 +39,18 @@ export type {
 } from "./types";
 
 export type { SelectionState } from "./selection";
+
+export type {
+  SubmitContactInput,
+  SubmitContactResult,
+  SubmitContactSuccess,
+  SubmitContactError,
+} from "./submit-contact";
+
+export type {
+  ContactFormInput,
+  SelectionInput,
+  SubmitKind,
+  LeadStatus,
+  TaskCategory,
+} from "./submit-mapping";
