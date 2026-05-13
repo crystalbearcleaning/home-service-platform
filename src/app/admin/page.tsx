@@ -97,6 +97,18 @@ export default async function AdminPage() {
         >
           Rate limit test →
         </Link>
+        <Link
+          href="/admin/auto-quote-test"
+          className="underline text-gray-700 hover:text-black"
+        >
+          Auto-Quote test →
+        </Link>
+        <Link
+          href="/admin/quote-interactions"
+          className="underline text-gray-700 hover:text-black"
+        >
+          Quote interactions →
+        </Link>
       </nav>
 
       <p className="mt-10 text-xs text-gray-500">

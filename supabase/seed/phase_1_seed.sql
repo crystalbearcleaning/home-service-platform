@@ -391,6 +391,7 @@ begin
      'formula',
      jsonb_build_object(
        'formula', 'sqft * 0.10',
+       'per_sqft', 0.10,
        'inputs', jsonb_build_array('sqft'),
        'rounding', 'none'
      ),

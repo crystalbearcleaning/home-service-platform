@@ -951,6 +951,368 @@ admin test page exercises both paths end-to-end against real Supabase.
 
 ---
 
+## Window Cleaning Auto-Quote Plugin
+
+Lives in `src/plugins/window-cleaning-auto-quote/`. Calculates instant
+exterior quote options + the interior add-on price for a given
+square-footage value. Calculation only — does not write quotes / leads
+/ contacts and does not handle the customer-facing flow.
+
+### Public API
+
+| Function | Side | Purpose |
+|---|---|---|
+| `calculateWindowCleaningQuote(input)` | server | Public entry point. Validates input, branches to the manual-quote fallback when needed, loads the typed config from core tables, runs the math, returns the structured output. |
+| `buildQuoteOutput(input, loadedConfig)` | pure | The pure orchestrator used by tests: builds options / add-ons / snapshots from already-loaded config. |
+| `calculatePrices(sqft, parsedPricingConfig)` | pure | The pure pricing math. |
+| `parsePriceRules(rows)` | pure | Parses raw `price_rules` rows into a typed `ParsedPricingConfig`. |
+| `loadAutoQuoteConfig(businessId)` | server | Loads `services` + `service_plans` + `price_rules` for the business and returns a `LoadedConfig`. |
+| `DEFAULT_PRICING_CONFIG` | const | Documented Phase 1 defaults (mirrors the seed) — exposed for tests and as a defensive fallback. |
+| `REQUIRED_PRICE_RULE_KEYS` | const | The six rule keys the plugin needs in `price_rules`. |
+| `WINDOW_CLEANING_AUTO_QUOTE` | const | Plugin identity (`pluginKey`, `version`, `actionKey`). |
+
+### Pricing rules it reads
+
+The plugin always pulls live values from core `price_rules` for the
+active business via `loadAutoQuoteConfig`. Six rule keys are required:
+
+| Rule key | Used as |
+|---|---|
+| `minimum` | `rule_config.min_price` → `minimum` (default 199). |
+| `base_exterior` | per-sqft multiplier. Read from `rule_config.per_sqft` → `rule_config.multiplier` → parsed from the formula string `sqft * N`. |
+| `one_time_exterior` | `rule_config.multiplier` (default 1.0) + `rule_config.rounding`. |
+| `six_month_exterior` | `rule_config.multiplier` (default 0.9). |
+| `three_month_exterior` | `rule_config.multiplier` (default 0.8). |
+| `interior_add_on` | `rule_config.multiplier` (default 0.5). |
+
+Math (matches decision 0001 §1):
+
+```
+base = sqft * baseExteriorPerSqft
+one_time = round(max(base * oneTimeMultiplier, minimum))
+six_month = round(max(base * sixMonthMultiplier, minimum))
+three_month = round(max(base * threeMonthMultiplier, minimum))
+interior = round(one_time * interiorMultiplier)
+```
+
+`round` is configurable via the `rounding` field on the
+`one_time_exterior` rule — `nearest_dollar` (default) or `none`.
+
+`DEFAULT_PRICING_CONFIG` is exported for tests and as a defensive
+fallback (the user can pass it to `buildQuoteOutput` directly). The
+normal calculation path **always** reads from the DB; defaults are
+never used silently.
+
+### Input
+
+```ts
+type QuoteCalculationInput = {
+  businessId: string;
+  square_footage: number | null;
+  property_data_status: "found" | "missing" | "partial" | "error" | string;
+  property_type?: string | null;
+  service_area_id?: string | null;
+  source_plugin_version?: string;
+  normalized_address?: unknown;
+  property_snapshot?: unknown;
+};
+```
+
+Required fields: `businessId`, `square_footage`, `property_data_status`.
+The rest are passed through for traceability (the future quote flow
+will stamp them onto the immutable quote snapshot).
+
+### Output
+
+```ts
+type QuoteOutput = {
+  can_quote: boolean;
+  manual_quote_required: boolean;
+  reason: string | null;
+  options: QuoteOption[];          // [] when can_quote = false
+  add_ons: QuoteAddOn[];           // [] when can_quote = false
+  selected_option_key: null;       // ALWAYS null — customer picks later
+  selected_add_ons: [];            // ALWAYS empty in this step
+  line_items_snapshot: LineItem[] | null;
+  price_snapshot: PriceSnapshot | null;
+  calculation_snapshot: CalculationSnapshot;
+  warnings: string[];
+  source_plugin_key: "window_cleaning_auto_quote";
+  source_plugin_version: string;
+};
+```
+
+Each `QuoteOption` has:
+`option_key` · `service_plan_id` · `service_plan_name` · `display_label`
+· `is_recommended` · `exterior_price` · `recurring_interval_months` ·
+`price_label` (e.g. `"$225 per visit"` or `"$250"`).
+
+The `QuoteAddOn` for `interior_window_cleaning`:
+`service_id` · `service_code` · `service_name` · `price` ·
+`display_label` (e.g. `"Add Interior Window Cleaning to This Cleaning: +$125"`).
+
+`calculation_snapshot` includes `square_footage`,
+`base_exterior_before_minimum`, `minimum_price`, `one_time_formula`,
+`six_month_multiplier`, `three_month_multiplier`,
+`interior_multiplier`, `minimum_applied` (per-option booleans),
+`rounding`, `price_rules_used`, `reason`, and `generated_at`.
+
+### Manual-quote fallback
+
+When `square_footage` is null/non-positive OR `property_data_status` is
+not `"found"`, the plugin returns:
+
+```ts
+{ ok: true, data: { can_quote: false, manual_quote_required: true,
+                    reason: "…", options: [], add_ons: [], … } }
+```
+
+This is the signal the future quote flow will use to render the
+manual-quote fallback message + capture contact info + queue an admin
+task. The plugin never throws and never produces invalid prices.
+
+### Wiring to the action registry
+
+The action metadata for `window_cleaning_auto_quote.calculate_quote` is
+already registered in core (B3 / B4 seeded the row + Zod schemas). C1
+deliberately does **not** wire the live handler into the runtime
+registry — callers (the Auto-Quote test page, the future quote flow)
+invoke `calculateWindowCleaningQuote` directly. Plumbing the handler
+through `getActionRegistry()` happens when the quote flow lands.
+
+### Testing `/admin/auto-quote-test`
+
+After `npm run dev` and signing in:
+
+1. From `/admin`, click **Auto-Quote test →**, or open
+   http://localhost:3000/admin/auto-quote-test.
+2. Pick an address from the autocomplete. The server action chains:
+   Google place details → normalize → service-area match →
+   (if in-area) RentCast → (if sqft found) Auto-Quote.
+3. Expected branches:
+   - **In-area + sqft found** → Quote card is green, shows three
+     options (one-time / 6-month with "$X per visit" / 3-month
+     **Recommended** with "$X per visit") + interior add-on; expandable
+     `calculation_snapshot` and `price_snapshot + line_items_snapshot`
+     blocks reveal the full numeric trail.
+   - **In-area + sqft missing** → Quote card is amber:
+     **Manual quote required** with the reason and an explanation of
+     the future fallback flow.
+   - **In-area + RentCast error** → Property card red; Quote card amber
+     "Auto-Quote skipped".
+   - **Out-of-area** → Property + Quote cards both amber "skipped".
+4. Spot-check the math against the expected numbers for a 2,500 sqft
+   home: one-time $250, 6-month $225/visit, 3-month $200/visit, interior
+   add-on $125.
+
+### What does NOT happen
+
+No DB writes on this page:
+
+- No `contacts`, `properties`, `leads`, `quotes`,
+  `quote_page_interactions`, `tasks`, `events`, `activities`, or
+  `issues` are created.
+- Only `service_areas`, `services`, `service_plans`, and `price_rules`
+  are read.
+- Google + RentCast each receive one call per address lookup.
+
+C1 is calculation only. **Not** quote acceptance, **not** scheduling,
+**not** job creation, **not** customer contact capture. Those land in
+later steps.
+
+### Tests
+
+Pure-unit tests (no DB, no fetch, no env reads):
+
+- `src/plugins/window-cleaning-auto-quote/pricing.test.ts` — 14 tests
+  covering normal sqft, recurring multipliers, interior add-on, partial
+  minimum, full minimum clamp, rounding modes, `parsePriceRules` happy
+  path + missing keys + malformed configs + explicit per_sqft override.
+- `src/plugins/window-cleaning-auto-quote/quote.test.ts` — 16 tests
+  covering three-options + one-add-on output, no default selection,
+  recommended flag, `per visit` price labels, snapshot shapes,
+  warnings, plugin key/version stamping, manual-quote fallback paths
+  (null sqft, `missing` property_data_status, zero sqft, missing
+  business id), and override versions.
+
+DB-write tests for the live config loader are deferred — they need
+either a test database or a mock Supabase client. The admin test page
+exercises the full server-side path against real Supabase + Google +
+RentCast.
+
+---
+
+## Public Quote Flow (C2) — `/q`
+
+C2 lights up the first half of the customer quote flow on the public
+Customer Quote App Surface. Anonymous visitors can pick an address and
+see the three quote option cards + interior add-on. **C2 stops short
+of contact capture and core record creation** — that arrives in C3.
+
+### What `/q` does now
+
+1. Resolves the business + app surface via the B2 host resolver
+   (`crystal-bear` + `quote` in dev).
+2. Loads `business_settings` for customer-facing copy (trust points,
+   fallback messages, scheduling copy, secondary phone) via
+   service-role.
+3. Renders the B5 Google autocomplete. Customer **must** pick from the
+   dropdown — free-typed input is rejected (B5 behavior).
+4. On select, calls the public server action
+   `lookupAddressForQuoteAction(placeId)` which delegates to
+   `lookupAddressAndPreview` in the Customer Quote / Sales Page plugin.
+
+### Server-side flow
+
+`src/plugins/customer-quote-sales-page/address-lookup.ts`:
+
+1. **Rate-limit check** — `quote.address_lookup` (B7, IP+address hash;
+   address bucket key is the Google `place_id` so repeat lookups for
+   the same address are gated together). Blocked → `RATE_LIMITED`
+   error with `retryAfterSeconds`.
+2. **Google Place Details + normalize** (B5). Failure → `GEO_FAILED`.
+3. **Service-area match** (B5).
+4. **If out of area** → record `quote_page_interactions`
+   (`interaction_status='out_of_area'`, `service_area_status='out_of_area'`,
+   `property_data_status='not_requested'`). Do **not** call RentCast
+   or Auto-Quote.
+5. **If in area** → RentCast `enrichProperty` (B6). Hard failures land
+   in the interaction as `provider_error` with status `error`.
+6. **If sqft missing** → record interaction
+   (`interaction_status='property_data_missing'`,
+   `property_data_status='missing'`). Do **not** call Auto-Quote.
+7. **If sqft found** → Auto-Quote `calculateWindowCleaningQuote` (C1).
+   Record interaction with `interaction_status='quote_generated'`,
+   `quote_preview_data` = full Auto-Quote output.
+8. **Record rate-limit event** for the lookup (success-side only).
+9. Return discriminated `AddressLookupResult` to the client.
+
+### Quote cards UI
+
+When the result is `quote_generated`, the client renders:
+
+- Three OptionCards (One-Time, Every 6 Months, Every 3 Months —
+  **Recommended**). **No option is selected by default.** Recurring
+  options show "$X per visit"; one-time shows "$X".
+- Interior add-on checkbox toggle ("Add Interior Window Cleaning to
+  This Cleaning: +$X").
+- "First cleaning total" panel that reads "Pick an option" until the
+  customer picks one, then shows the option price plus interior
+  add-on price when the toggle is on.
+- "Free screen cleaning included." line under the add-on.
+- Soft scheduling copy from `customer_quote_scheduling_copy`.
+- Primary CTA `Schedule My Cleaning` — disabled until an option is
+  selected. Clicking it shows the placeholder banner:
+  **"Contact step will be added next."** (No contact form in C2.)
+- Trust section at the bottom (six bullets from
+  `customer_quote_trust_points`).
+- Secondary phone line:
+  `Prefer to talk? Call us. [+ phone if set on the business row]`.
+
+When the result is `out_of_area` or `property_data_missing`, an amber
+fallback card renders with the seeded business-settings copy plus the
+**"Contact step will be added next."** placeholder.
+
+### Data that C2 writes
+
+- **`quote_page_interactions`** — exactly one row per address-lookup
+  attempt. Populated fields (when known):
+  `business_id`, `app_surface_id`, `installed_plugin_id` (when the
+  `customer_quote_sales_page` install is found),
+  `plugin_version` (`0.1.0`), `session_key` (null in C2),
+  `address_input`, `normalized_address`, `normalized_city`,
+  `google_place_id`, `latitude`, `longitude`,
+  `service_area_status`, `property_data_status`,
+  `property_data_summary`, `provider_error`, `interaction_status`,
+  `quote_preview_data` (when generated), `source`, `tracking_code`,
+  `utm_source`, `utm_medium`, `utm_campaign`, `referrer`.
+  **`converted_*` fields stay `NULL`** — those are owned by C3.
+- **`rate_limit_events`** — exactly one row per allowed lookup, via
+  B7's `recordRateLimitEvent`. Metadata includes
+  `interaction_status` + `service_area_status` for later analysis.
+
+That's it. C2 explicitly does **not** write any of:
+
+`contacts`, `properties`, `leads`, `quotes`, `tasks`, `events`,
+`activities`, `issues`. Verified by grep + code review — no insert
+statements on those tables exist in any C2 code path.
+
+### Interaction-status taxonomy
+
+C2 emits exactly four `interaction_status` values:
+
+| Status | When |
+|---|---|
+| `out_of_area` | service-area match returned `inArea=false`. RentCast not called. |
+| `property_data_missing` | in-area but RentCast returned no sqft, OR Auto-Quote flagged `manual_quote_required`. |
+| `quote_generated` | quote preview successfully produced. `quote_preview_data` is non-null. |
+| `error` | hard failure mid-flow (RentCast 5xx, etc.). `provider_error` is set. |
+
+`address_entered`, `contact_submitted`, `converted`, and `abandoned`
+remain in the schema but are emitted by later steps (C3+) or by no
+step at all in Phase 1.
+
+### How to test `/q`
+
+1. `npm run dev` (already running counts).
+2. Open http://localhost:3000/q in an incognito window — no auth.
+3. **Quote-generated branch:** type `100 E Boynton Beach Blvd` and
+   pick the suggestion. Expected: three option cards (3-month
+   Recommended), interior toggle, "First cleaning total" updates as
+   you click options + toggle interior, CTA enables once an option is
+   chosen, clicking the CTA shows "Contact step will be added next."
+4. **Out-of-area branch:** type a Wellington FL or Miami FL address.
+   Expected: amber fallback card with the seeded out-of-area copy +
+   "Contact step will be added next."
+5. **Property-data-missing branch:** pick an in-area address that
+   RentCast can't resolve (vacant lot, new construction). Expected:
+   amber fallback card with the "we don't have your home in our
+   system yet" copy.
+6. **Rate-limit branch:** rapidly pick 20+ addresses from the same
+   browser within 10 minutes. The 21st attempt returns the amber
+   "Slow down a sec." panel with retry-after seconds.
+
+### How to view admin quote interactions
+
+Sign in to `/admin`, click **Quote interactions →** (or visit
+http://localhost:3000/admin/quote-interactions).
+
+Each row shows: timestamp, formatted address, normalized city,
+interaction-status badge, service-area / property-data status, the
+selected option / total (both null in C2 since selection state lives
+client-side here), converted yes/no (always `no` in C2), and a
+preview-price summary when a quote was generated.
+
+Empty state until you hit `/q` for the first time.
+
+### Tests
+
+Pure-unit tests added in C2:
+
+- `src/plugins/customer-quote-sales-page/outcome.test.ts` — 7 tests
+  covering the discriminated branches of `decideOutcome` (out-of-area
+  short-circuits, in-area with null property → `error`,
+  property_data_missing, Auto-Quote not invoked, Auto-Quote returned
+  ok=false, Auto-Quote flagged manual_quote_required, full success).
+- `src/plugins/customer-quote-sales-page/selection.test.ts` — 6 tests
+  covering `INITIAL_SELECTION` (no default option), `findSelectedOption`,
+  `computeSelectedTotal` (null when nothing picked, option-only,
+  option + interior, missing add-on safety), `canSchedule`.
+
+Integration tests against live Google / RentCast are not added — the
+existing manual `/admin/property-data-test`, `/admin/auto-quote-test`,
+and now `/q` flows exercise the full pipeline against real Supabase.
+
+### Important boundary
+
+C2 is **calculation + preview only**. The "Schedule My Cleaning"
+button is a placeholder until C3 wires the contact form + the
+`submit_quote_request` server action that creates
+Contact + Property + Lead + Quote and marks the interaction
+`converted`.
+
+---
+
 ## Staging Reset Warning
 
 A staging-only data reset feature will be added in a later step. It
