@@ -27,7 +27,6 @@ import {
 } from "@/plugins/customer-quote-sales-page/submit-mapping";
 import type {
   OptionKey,
-  QuoteAddOn,
   QuoteOption,
   QuoteOutput,
 } from "@/plugins/window-cleaning-auto-quote/types";

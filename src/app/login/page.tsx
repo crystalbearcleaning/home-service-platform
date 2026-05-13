@@ -1,10 +1,31 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createClient } from "@/core/auth/client";
 
+// `useSearchParams` triggers CSR bailout in Next 15. Wrap the form in a
+// Suspense boundary so `next build` can prerender the shell.
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginShell />}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginShell() {
+  return (
+    <main className="min-h-screen flex items-center justify-center p-8 bg-gray-50">
+      <div className="w-full max-w-sm bg-white rounded-lg border p-6 shadow-sm">
+        <h1 className="text-xl font-semibold mb-1">Sign in</h1>
+        <p className="text-sm text-gray-600">Loading…</p>
+      </div>
+    </main>
+  );
+}
+
+function LoginForm() {
   const searchParams = useSearchParams();
   const nextPath = searchParams.get("next") ?? "/admin";
 

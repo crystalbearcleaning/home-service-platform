@@ -9,7 +9,6 @@ import type {
   NormalizedAddress,
   ServiceAreaMatch,
 } from "@/core/geo";
-import type { NormalizedPropertyData } from "@/core/property-data";
 import type {
   QuoteAddOn,
   QuoteOption,
