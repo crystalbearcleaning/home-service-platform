@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
+import { readStagingToolsGate } from "@/core/staging-tools/env";
 import { SignOutButton } from "./sign-out-button";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,8 @@ export default async function AdminPage() {
       </main>
     );
   }
+
+  const stagingGate = readStagingToolsGate(process.env);
 
   return (
     <main className="min-h-screen p-8 max-w-3xl mx-auto">
@@ -127,6 +130,14 @@ export default async function AdminPage() {
         >
           Tasks →
         </Link>
+        {stagingGate.publicEnabled && (
+          <Link
+            href="/admin/staging-tools"
+            className="underline text-amber-700 hover:text-amber-900"
+          >
+            Staging tools →
+          </Link>
+        )}
       </nav>
 
       <p className="mt-10 text-xs text-gray-500">

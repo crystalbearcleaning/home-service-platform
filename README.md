@@ -1313,27 +1313,98 @@ Contact + Property + Lead + Quote and marks the interaction
 
 ---
 
-## Staging Reset Warning
+## Staging Reset (C4)
 
-A staging-only data reset feature will be added in a later step. It
-clears quote-flow test data (interactions, fake contacts, fake leads,
-fake quotes, related tasks/activities) while preserving setup data
-(workspace, users, roles, app surfaces, plugins, services, pricing).
+`/admin/staging-tools` exposes a destructive button that wipes
+quote-flow test data so QA can iterate without manually cleaning rows
+between runs. **It is never safe to enable in production.**
 
-The reset feature is gated by **two** flags that must both be true:
+### Double env gate
 
-- `NEXT_PUBLIC_ENABLE_STAGING_TOOLS=true` (controls whether the button
-  renders)
-- `ENABLE_STAGING_TOOLS=true` (controls whether the server action will
-  run)
+The feature is gated by **two** independent flags that must *both* be
+`true`. Setting one in isolation does nothing:
 
-**Never set either flag to `true` in production.** The frontend flag
-alone is not sufficient — the server action validates the server-side
-flag before running so a tampered client cannot trigger a reset.
+| Flag                                  | Side   | What it controls                                                            |
+| ------------------------------------- | ------ | --------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_ENABLE_STAGING_TOOLS`    | client | Whether the page renders + whether the `/admin` nav link appears.           |
+| `ENABLE_STAGING_TOOLS`                | server | Whether `resetStagingDataAction` will actually execute the deletes.         |
 
-If you accidentally enable staging tools in a production-like
-environment, disable both flags immediately and audit recent activity
-for unexpected deletions.
+The client flag is *advisory*; the server flag is the only thing that
+unlocks destructive writes. A tampered client cannot trigger a reset
+because `resetStagingDataAction` re-reads `process.env.ENABLE_STAGING_TOOLS`
+on every call.
+
+### How to use
+
+1. Set both flags to `true` in your local `.env.local` and restart
+   `next dev`.
+2. Sign in as an admin and visit `/admin` — a "Staging tools →" link
+   appears in amber.
+3. Open `/admin/staging-tools`. The page lists the exact `WHERE`
+   clauses that will be used per table.
+4. Type the confirmation string `RESET QUOTE FLOW DATA` into the
+   destructive panel and click **Reset quote-flow data**.
+5. The server action verifies the env gate, your auth, your active
+   business membership, and the confirmation string, then runs the
+   plan. You'll see per-table deleted-row counts on success.
+
+### What it deletes
+
+Scoped to your active business by `business_id` plus a plugin/source
+filter on every table, in this dependency-safe order:
+
+| Table                       | Filter                                                                                          |
+| --------------------------- | ----------------------------------------------------------------------------------------------- |
+| `quote_page_interactions`   | `business_id = ?` (the table is plugin-owned)                                                   |
+| `tasks`                     | `business_id = ?` AND `source_plugin_key IN (customer_quote_sales_page, window_cleaning_auto_quote)` |
+| `activities`                | same plugin filter                                                                              |
+| `events`                    | `business_id = ?` AND `event_type IN` (quote-flow event-type list)                              |
+| `issues`                    | same plugin filter                                                                              |
+| `quotes`                    | `business_id = ?` AND `source_plugin_key = window_cleaning_auto_quote`                          |
+| `leads`                     | `business_id = ?` AND `created_from_plugin_key = customer_quote_sales_page`                     |
+| `properties`                | `business_id = ?` AND `contact_id IN (contacts where source = 'quote_app')`                     |
+| `contacts`                  | `business_id = ?` AND `source = 'quote_app'`                                                    |
+| `rate_limit_events`         | `action_key IN (quote.address_lookup, quote.submit_contact, geo.autocomplete_server)`           |
+
+`rate_limit_events` has no `business_id` column. In Phase 1 there is one
+workspace per database so this is safe, but **do not run the reset on a
+shared multi-tenant database** — it would clear rate-limit history for
+every workspace.
+
+### What it preserves
+
+Every setup table is left untouched:
+
+`businesses`, `user_profiles`, `business_memberships`, `business_roles`,
+`membership_roles`, `role_permissions`, `user_permission_overrides`,
+`role_blueprints`, `app_surfaces`, `app_surface_blueprints`,
+`app_surface_domains`, `role_app_surface_access`,
+`user_app_surface_overrides`, `plugin_definitions`,
+`installed_plugins`, `plugin_ui_registrations`,
+`plugin_action_registrations`, `data_dictionary_fields`,
+`business_settings`, `service_areas`, `services`, `service_plans`,
+`price_rules`.
+
+This list is pinned in `src/core/staging-tools/plan.ts` as
+`PRESERVED_TABLES` and a unit test asserts no preserved table can ever
+be added to the reset plan.
+
+### Safety summary
+
+- Server-side `ENABLE_STAGING_TOOLS` check (action refuses otherwise).
+- Authenticated user check (Supabase Auth).
+- Active business membership check (deletes are scoped to *your*
+  business; you cannot reset someone else's data).
+- Confirmation string `RESET QUOTE FLOW DATA` is re-checked
+  server-side, not just in the UI.
+- Hardcoded plugin / source filters on every table — a new event type
+  or plugin key has to be explicitly added to the plan to be in scope.
+- Returns per-table counts so the operator can verify what landed.
+
+**Never set either flag to `true` in production.** If you accidentally
+enable staging tools in a production-like environment, disable both
+flags immediately, restart the server, and audit recent activity for
+unexpected deletions.
 
 ---
 
