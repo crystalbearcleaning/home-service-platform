@@ -10,6 +10,8 @@ Phase 1 is intentionally narrow. Do not overbuild. Do not create future CRM/job/
 
 **Phase 2 admin work** (reorganization, shell, design tokens) is governed by `docs/PHASE_2_ADMIN_ORGANIZATION_AND_DESIGN.md`. Every new or migrated `/admin/*` page must use the shared admin shell and shared UI components defined there — no one-off page chrome, no ad-hoc Tailwind blocks, no hardcoded colors outside the semantic token set. Phase 2 must not change business logic or schema; if a task seems to require either, stop and ask first.
 
+**Phase 3 work** (Message Automations + lightweight request handling) is governed by `docs/PHASE_3_MESSAGE_AUTOMATIONS_AND_REQUEST_HANDLING.md`. Phase 3 adds an internal-SMS automations area backed by a GoHighLevel adapter, wires quote-flow `task.created` events to it, and ships a lightweight `/admin/leads/[leadId]` detail page with task completion + notes. Customer submission must still succeed if SMS sending fails. Do not build customer-facing automations, email, two-way inbox, conversation sync, AI-written messages, full CRM, scheduling, jobs, invoices, payments, or quote acceptance in Phase 3. See the doc's Do-Not-Build list before extending Phase 3 scope.
+
 ## Phase 1 Goal
 
 Build the smallest working vertical slice that proves the platform architecture:

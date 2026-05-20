@@ -26,17 +26,29 @@ sign-off. The customer quote app (`/q`), admin shell scaffold, plugin
 registry, observability foundation, and staging reset are all in place
 and tested.
 
-Phase 2 is the **Admin reorganization + design-system** phase. It does
-not add new features — it reorganizes the existing admin into a single
-consistent shell with shared components and a theme-ready foundation.
-The source-of-truth design doc for Phase 2 is:
+Phase 2 is **complete** — see `docs/PHASE_2_QA_REPORT.md`. The admin
+shell, design tokens, shared components, and `/admin/testing` hub all
+landed in Phase 2A. The source-of-truth design doc is:
 
 - `docs/PHASE_2_ADMIN_ORGANIZATION_AND_DESIGN.md`
 
 Future `/admin/*` pages must use the shared shell + components defined
-in that doc. No business logic, server actions, or schema changes are
-allowed in Phase 2; if a task seems to require any of those, stop and
-ask first.
+in that doc.
+
+Phase 3 is the **Message Automations + lightweight request handling**
+phase. It adds an internal-SMS automations admin area backed by a
+GoHighLevel adapter, wires the existing quote-flow `task.created`
+events to it, and ships a lightweight `/admin/leads/[leadId]` detail
+page with task completion + internal notes. The source-of-truth design
+doc for Phase 3 is:
+
+- `docs/PHASE_3_MESSAGE_AUTOMATIONS_AND_REQUEST_HANDLING.md`
+
+Phase 3 stays narrow: no customer-facing automations, no email, no
+two-way inbox, no conversation sync, no AI message writing, no full
+CRM, no scheduling / jobs / invoices / payments / quote acceptance.
+Customer quote submission must still succeed even if SMS sending fails.
+See the doc's Do-Not-Build list before extending Phase 3 scope.
 
 ---
 
