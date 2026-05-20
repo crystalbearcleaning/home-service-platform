@@ -746,3 +746,75 @@ extends. Phase 3 does not rewrite or replace them.
   `events` / `activities` / `tasks`.
 
 No part of this list is being modified in Phase 3A.
+
+---
+
+## Appendix B — Phase 3B schema + seed (delivered)
+
+Step 3B shipped the database foundation only. **No app code, no GHL
+adapter, no quote-flow wiring, no SMS sends.**
+
+### Migration
+
+`supabase/migrations/20260520120000_phase_3_message_automations.sql`
+adds four tables, indexes, CHECK constraints, RLS enable, and a
+members-SELECT policy per table.
+
+| Table | Purpose | Notable shape |
+|---|---|---|
+| `notification_recipients` | Per-business recipient list. | `phone_e164` CHECK (`^\+[1-9][0-9]{6,14}$`), UNIQUE `(business_id, phone_e164)`. |
+| `message_automations` | Configurable automation rules. | `channel='sms'` + `provider_key='gohighlevel'` CHECKs, UNIQUE `(business_id, automation_key)`. |
+| `automation_recipients` | Join: automation ↔ recipient. | UNIQUE `(automation_id, recipient_id)`. |
+| `notification_logs` | One row per send attempt. | `status` CHECK (`pending/sent/failed/skipped`), `retried_from_log_id` self-ref FK, nullable related-object FKs (ON DELETE SET NULL). |
+
+### RLS approach
+
+All four tables follow **Pattern B** from the Phase 1 RLS migration:
+authenticated business members may `SELECT`; `INSERT` / `UPDATE` /
+`DELETE` are routed through the service-role client only (Phase 3D
+will add controlled admin server actions; Phase 3C-onward writes
+notification logs from the engine via service-role).
+
+### Seed
+
+`supabase/seed/phase_3_seed.sql` (applied by `supabase/seed/run_seed.sh`
+after `phase_1_seed.sql`):
+
+- Seeds three automations on Crystal Bear: `schedule_request`,
+  `manual_quote_needed`, `service_area_review`. All enabled, channel
+  `sms`, provider `gohighlevel`, template keys
+  `internal_*_v1`, and short template previews.
+- Seeds the **recipient + assignments only when**
+  `SEED_NOTIFICATION_PHONE_E164` is set in `.env.local`. Sam is created
+  (`name='Sam'`, `role_label='Owner'`, `is_active=true`) and assigned
+  to all three automations. When the env var is empty the seed prints
+  a `NOTICE` block with copy-paste instructions and skips the recipient
+  rows — automations still seed.
+- No `notification_logs` rows are seeded.
+
+### Env vars added
+
+`.env.example` now lists:
+
+- `SEED_NOTIFICATION_PHONE_E164` — optional; substituted into
+  `phase_3_seed.sql` by the runner.
+- `GHL_API_KEY` / `GHL_LOCATION_ID` / `GHL_FROM_PHONE_NUMBER` /
+  `GHL_BASE_URL` — server-only. **Not** read by Phase 3B; declared now
+  so operators can populate them before Phase 3C lands.
+
+### Verification
+
+Read-only verification queries live at
+`supabase/seed/PHASE_3_VERIFICATION.sql`. They check: tables exist, RLS
+is enabled, SELECT policies exist, the three automations seeded, the
+recipient + assignments exist only when the phone env was set, no
+notification logs seeded, and CHECK / UNIQUE constraints are in place.
+
+### Applied to the linked project
+
+The migration was applied via `supabase db push --linked --include-all`
+and the seed via `supabase/seed/run_seed.sh` on 2026-05-19. Verification
+queries confirmed: four tables present, RLS enabled with one
+members-SELECT policy per table, three automations seeded (all enabled),
+Sam recipient seeded with three assignments, zero `notification_logs`
+rows, all CHECK / UNIQUE constraints in place.
