@@ -818,3 +818,191 @@ queries confirmed: four tables present, RLS enabled with one
 members-SELECT policy per table, three automations seeded (all enabled),
 Sam recipient seeded with three assignments, zero `notification_logs`
 rows, all CHECK / UNIQUE constraints in place.
+
+---
+
+## Appendix C — Phase 3C messaging foundation (delivered)
+
+Step 3C shipped the server-only messaging layer: provider-agnostic
+adapter interface, GoHighLevel SMS adapter, template rendering,
+notification-log state transitions, and one internal admin test page.
+**No quote-flow wiring, no customer SMS, no two-way inbox, no GHL
+conversation sync.**
+
+### Module map — `src/core/messaging/`
+
+| File | Side | Purpose |
+|---|---|---|
+| `types.ts` | pure | Statuses / channels / provider keys / template keys + `TemplateContext` / `SmsSendInput` / `SmsSendResult` / `SafeProviderResponse` / `ProviderConfigStatus` / `NotificationLogSummary`. |
+| `config.ts` | pure | `readGhlConfigStatus(env)` → `{ providerKey, configured, missingKeys }`. `resolveGhlConfig(env)` returns the typed config or the missing-key list. Default base URL is `https://services.leadconnectorhq.com`. |
+| `templates.ts` | pure | Three renderers (`renderScheduleRequest`, `renderManualQuoteNeeded`, `renderServiceAreaReview`) + the `renderMessage(templateKey, ctx)` dispatcher. All take a `TemplateContext` with every field optional; missing values fall back to readable phrases. |
+| `render.ts` | pure | `renderByTemplateKey(key, ctx)` — string-keyed orchestrator returning a discriminated result; surfaces `UNKNOWN_TEMPLATE`. |
+| `sanitize.ts` | pure | `sanitizeProviderResponse(raw)` whitelists known-safe scalar keys, drops nested objects / arrays, strips Authorization / api_key / token / secret-shaped keys (and values), truncates strings to 120 chars. |
+| `provider.ts` | server | `SmsProviderAdapter` interface + `getSmsProviderAdapter(providerKey)` registry — currently a single `gohighlevel` entry. |
+| `providers/gohighlevel.ts` | server-only | The GHL adapter. Two-call send (`/contacts/upsert` then `/conversations/messages`). Validates input, resolves env, returns discriminated `SmsSendResult`. Never throws. |
+| `notification-logs.ts` | server-only | `createPendingNotificationLog`, `markNotificationLogSent`, `markNotificationLogFailed`, `createSkippedNotificationLog`, `listRecentNotificationLogs`. All use the service-role client. |
+| `send-internal-sms.ts` | server-only | The Phase 3C orchestrator. Pre-flight → write skipped (or pending) log → call adapter → mark sent / failed. Customer submission and other callers must wrap so a failure is non-fatal upstream. |
+| `index.ts` | barrel | Public re-exports. Server-only modules retain their directive — importing the barrel in a Client Component will still fail at build time exactly as if the offending module had been imported directly. |
+
+### GHL adapter assumptions
+
+Documented inline at the top of `providers/gohighlevel.ts`:
+
+- Targets the **LeadConnector v2 API** at
+  `https://services.leadconnectorhq.com` (override with `GHL_BASE_URL`).
+- v2 has no "send SMS to a raw phone" endpoint, so the adapter
+  performs a two-call send:
+  1. `POST /contacts/upsert` — resolves / creates the recipient by phone.
+  2. `POST /conversations/messages` — sends the SMS to the resolved
+     contact id.
+- Required headers on every request: `Authorization: Bearer
+  <GHL_API_KEY>`, `Version: 2021-04-15`, `Accept: application/json`,
+  `Content-Type: application/json`.
+- If the user's GHL configuration needs a different endpoint, body
+  shape, or version header, only this file changes — the engine, log
+  writer, and admin UI stay put.
+
+The adapter never throws. API keys, bearer tokens, and raw response
+headers are never echoed back, logged, or rendered.
+
+### Env vars used (Phase 3C)
+
+Read by `providers/gohighlevel.ts` only:
+
+- `GHL_API_KEY` — required.
+- `GHL_LOCATION_ID` — required.
+- `GHL_FROM_PHONE_NUMBER` — required (used as `fromNumber`).
+- `GHL_BASE_URL` — optional; defaults to the LeadConnector v2 host.
+
+Read by `send-internal-sms.ts` indirectly through
+`readGhlConfigStatus(process.env)` to decide whether to write a
+`pending` log or a `skipped` `MISSING_CONFIG` log.
+
+### Templates
+
+Three seeded templates, mirrored in `TEMPLATE_KEYS`:
+
+- `internal_schedule_request_v1` — "New schedule request: …"
+- `internal_manual_quote_needed_v1` — "Manual quote needed: …"
+- `internal_service_area_review_v1` — "Out-of-area lead: …"
+
+Each accepts a `TemplateContext` with `customer_name`, `address`,
+`city`, `plan_label`, `total`, `task_category`. Missing values fall
+back to "a lead" / "an address" / "their area" / "their selected plan"
+/ "(no total)". No customer email is ever included.
+
+### Notification-log flow
+
+`sendInternalSmsNotification(input)`:
+
+1. Pre-flight validation (businessId, phone, body). If a row can still
+   be inserted, write a `skipped` log with the validation reason.
+2. If GHL env is incomplete → insert one `skipped` log row with
+   `error_code='MISSING_CONFIG'` and short reason; return without a
+   network call.
+3. Otherwise → insert `pending` log row.
+4. Call `getSmsProviderAdapter('gohighlevel').sendSms(...)`.
+5. Success → `UPDATE` the same row to `sent`, set
+   `provider_message_id`, `sent_at`, and the sanitized
+   `provider_response`.
+6. Failure → `UPDATE` the same row to `failed`, set `error_code`,
+   `error_message`, `failed_at`, and the sanitized response (when
+   available).
+
+Manual retry (not yet surfaced in the admin UI in Phase 3C, but
+plumbed): callers can invoke `createPendingNotificationLog` with
+`retriedFromLogId = <original failed log id>` to create a **new**
+pending row linked to the original; the original failed row is never
+mutated.
+
+### Internal SMS test page — `/admin/testing/message-sms`
+
+The only UI shipped in Phase 3C, accessible from the Testing tools
+hub.
+
+- Auth + active-business gated.
+- Renders provider status (`configured` true/false + missing key
+  names). Never displays a key value.
+- Lists active `notification_recipients` for the workspace; phone
+  numbers are masked (country prefix + last 4 only).
+- Lists the three seeded template keys.
+- "Send one test SMS" button calls `sendTestSmsAction`, which:
+  - re-checks auth + active business
+  - validates recipient belongs to the business + is active
+  - renders the template with `SAMPLE_TEMPLATE_CONTEXT` (Jane Smith,
+    8126 Valhalla Dr, Boca Raton, Every 3 Months, $439)
+  - calls `sendInternalSmsNotification` with `automationId=null`
+    (ad-hoc test) and no related-object FKs
+- Shows the resulting status (`sent` / `failed` / `skipped`), log id
+  prefix, provider message id (when available), and the rendered body.
+- Below the form, shows the 10 most recent `notification_logs` rows
+  for the workspace with masked phones, status pills, and error info
+  when present.
+
+The page never creates or touches contacts, properties, leads,
+quotes, tasks, events, activities, issues, or
+`quote_page_interactions`.
+
+### Testing without GHL credentials
+
+With `GHL_API_KEY` / `GHL_LOCATION_ID` / `GHL_FROM_PHONE_NUMBER`
+empty:
+
+- Page renders normally; provider badge shows "missing config".
+- "Send" button still works; the action returns
+  `status='skipped'` with `error.code='MISSING_CONFIG'`.
+- A `skipped` `notification_logs` row is written with
+  `error_code='MISSING_CONFIG'`. **No network call is attempted.**
+
+With the three GHL keys set + `SEED_NOTIFICATION_PHONE_E164` seeded:
+
+- Sam appears as an active recipient.
+- "Send" triggers a real upsert + message POST to GHL.
+- Log transitions `pending → sent` on success (or `failed` with the
+  provider's HTTP status / error code on failure).
+- Sam receives one SMS.
+
+### Tests
+
+Unit tests in `src/core/messaging/`:
+
+- `config.test.ts` — env presence, whitespace handling, default base
+  URL, custom base URL trimming.
+- `templates.test.ts` — full + partial context, fallback phrases,
+  whitespace collapsing, never includes "@".
+- `render.test.ts` — dispatcher happy path + `UNKNOWN_TEMPLATE`.
+- `sanitize.test.ts` — message-id / status extraction, secret-shaped
+  key stripping, nested-object / array dropping, string truncation,
+  conversationId preservation, secret-shaped value rejection.
+- `providers/gohighlevel.test.ts` — `INVALID_INPUT` on bad phone /
+  empty body; `MISSING_CONFIG` returned without calling fetch (fetch
+  spy proves zero network requests); `pickContactId` /
+  `extractContactObject` helpers.
+
+Live GHL integration tests are intentionally not added — they'd leak
+quota, require real credentials, and be non-deterministic. The
+`/admin/testing/message-sms` page exercises the end-to-end path
+against the real provider when GHL env is set.
+
+DB-write tests for the notification-log helpers are deferred (they
+need a test database or a mock Supabase client). The admin page
+exercises them end-to-end against the live Supabase project.
+
+### What is intentionally NOT built in Phase 3C
+
+- Full Message Automations admin UI (list / detail / enable-disable /
+  recipient management) — Phase 3D.
+- Quote-flow `task.created` → engine wiring — Phase 3E.
+- Lead detail / task completion / notes — Phase 3F.
+- Customer SMS, customer reminders, email automations, two-way
+  inbox, GHL conversation sync, AI message writing — never in Phase 3.
+- New database schema. Phase 3B's four tables are sufficient for
+  Phase 3C.
+
+### Quality gates at end of Phase 3C
+
+- `npx tsc --noEmit` — clean (0 errors).
+- `npm run test` — **241 / 241 tests pass** across 27 files (40 new
+  messaging tests).
+- `npm run lint` — clean (0 warnings, 0 errors).
+- `npm run build` — green; 21 admin routes compile (`+ /admin/testing/message-sms`).

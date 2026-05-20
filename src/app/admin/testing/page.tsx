@@ -55,6 +55,14 @@ const TOOLS: TestTool[] = [
       "Exercise the rate-limiter (check + record) without touching any business tables.",
     scope: "Writes rate_limit_events only.",
   },
+  {
+    href: "/admin/testing/message-sms",
+    title: "Message SMS test",
+    description:
+      "Send one internal test SMS through the GoHighLevel adapter and watch the notification log transition pending → sent / failed.",
+    scope:
+      "Writes notification_logs only. Requires SEED_NOTIFICATION_PHONE_E164 + GHL_* env to actually send.",
+  },
 ];
 
 export default async function TestingHubPage() {
