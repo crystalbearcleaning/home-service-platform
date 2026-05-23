@@ -21,8 +21,18 @@ describe("resolveAdminNav", () => {
       "Overview",
       "Plugins",
       "Business Records",
+      "Automations",
       "Observability",
       "Tools",
+    ]);
+  });
+
+  it("includes Message Automations under the Automations group", () => {
+    const groups = resolveAdminNav({ stagingToolsEnabled: false });
+    const automations = groups.find((g) => g.label === "Automations");
+    expect(automations).toBeDefined();
+    expect(automations?.items.map((i) => i.href)).toEqual([
+      "/admin/message-automations",
     ]);
   });
 

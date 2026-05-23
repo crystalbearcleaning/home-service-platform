@@ -1006,3 +1006,109 @@ exercises them end-to-end against the live Supabase project.
   messaging tests).
 - `npm run lint` — clean (0 warnings, 0 errors).
 - `npm run build` — green; 21 admin routes compile (`+ /admin/testing/message-sms`).
+
+---
+
+## Appendix D — Phase 3D Message Automations admin UI (delivered)
+
+Step 3D shipped the read + edit surface for the three seeded
+automations and the global recipient list. **No quote-flow wiring, no
+customer SMS, no lead detail / task completion / notes, no new schema.**
+
+### Navigation
+
+`Automations` is now a top-level admin nav group between
+`Business Records` and `Observability`, with one item:
+
+```
+Automations
+  └── Message Automations → /admin/message-automations
+```
+
+Sidebar order (after Phase 3D):
+```
+Overview → Plugins → Business Records → Automations →
+Observability → Tools
+```
+
+The icon is a new `broadcast` glyph added to `AdminIcon`.
+
+### Routes added
+
+| Route | Purpose |
+|---|---|
+| `/admin/message-automations` | List page. GHL provider status (presence only), search input, automation list with per-row trigger / channel / provider / recipient count / last-send pill, and a 15-row recent-logs section across all automations. |
+| `/admin/message-automations/[automationId]` | Detail page. Read-only metadata + template preview. Edit affordances: toggle automation `is_enabled` and per-recipient assignment. Per-automation log list with inline retry on failed rows. |
+| `/admin/message-automations/recipients` | Recipient list with inline add/edit form. E.164 validation client + server, duplicate-phone detection with a friendly error, active/inactive toggle. |
+
+All three routes use the shared `<AdminShell>` + `<PageHeader>` +
+shared cards/badges per Phase 2. Phone numbers are always rendered
+through `maskPhoneE164` (country prefix + last 4).
+
+### Search
+
+Pure helper `filterAutomations(rows, q)` matches AND-tokenized lowercase
+substrings across `name`, `description`, and `automation_key`. Client
+debounces input (200 ms) and updates `?q=` via
+`router.replace(..., { scroll: false })`; the server component re-runs
+the filter on each request. 11 unit tests in `admin-search.test.ts`.
+
+### Server actions
+
+All live in `src/app/admin/message-automations/actions.ts`. Each runs
+the same auth / active-business / service-role pattern as Phase 3C and
+returns a discriminated result; no unhandled errors propagate to the
+client.
+
+| Action | Writes |
+|---|---|
+| `setAutomationEnabledAction({ automationId, isEnabled })` | `message_automations.is_enabled` |
+| `setAutomationRecipientAssignmentAction({ automationId, recipientId, assigned, isEnabled? })` | `automation_recipients` (insert / upsert / delete via the `(automation_id, recipient_id)` unique key) |
+| `upsertNotificationRecipientAction({ recipientId?, name, phoneE164, roleLabel?, isActive })` | `notification_recipients` (insert or update). Validates via `validateRecipientInput`; maps unique-violation 23505 to a friendly `DUPLICATE_PHONE`. |
+| `retryNotificationLogAction({ logId })` | New row in `notification_logs` via the Phase 3C engine. Original row never mutated. Uses `retryFailedNotificationLog` which enforces business scope + `status='failed'` precondition. |
+
+Each action calls `revalidatePath` so the list + detail pages reflect
+mutations on the next render.
+
+### Validation
+
+Pure helper `validateRecipientInput` in
+`src/core/messaging/admin-validation.ts`:
+
+- `name` — required, ≤ 120 chars, trimmed.
+- `phoneE164` — required, must match `^\+[1-9][0-9]{6,14}$`
+  (mirror of the DB CHECK).
+- `roleLabel` — optional, ≤ 80 chars, null when empty/whitespace.
+- `isActive` — must be boolean.
+
+Returned errors are field-tagged so the form can render per-field
+messages. 11 unit tests in `admin-validation.test.ts`.
+
+### Retry
+
+`src/core/messaging/retry.ts` reads the original failed log via
+service-role, verifies `business_id === active_business` and
+`status === 'failed'`, then dispatches the SAME `rendered_message` to
+the Phase 3C engine with `retriedFromLogId` set. The original row is
+never mutated. The detail page surfaces an inline `Retry` button on
+every `failed` log row; success/failure feedback renders next to the
+button.
+
+### What is intentionally NOT built in Phase 3D
+
+- Quote-flow `task.created` → engine wiring — Phase 3E.
+- Lead detail / task completion / notes — Phase 3F.
+- Custom automation creation, trigger builder, template editor,
+  provider switcher — never in Phase 3.
+- Customer-facing message templates, customer SMS reminders, email
+  automations, two-way inbox, GHL conversation sync, AI message
+  writing — never in Phase 3.
+- New database schema. The Phase 3B tables remain sufficient.
+
+### Quality gates at end of Phase 3D
+
+- `npx tsc --noEmit` — clean (0 errors).
+- `npm run test` — **275 / 275 tests pass** across 30 files (+28 new
+  Phase 3D tests: search, validation, retry input checks, nav group).
+- `npm run lint` — clean (0 warnings, 0 errors).
+- `npm run build` — green; 24 admin routes compile (`+ /admin/message-automations`, `+ /admin/message-automations/[automationId]`, `+ /admin/message-automations/recipients`).

@@ -77,6 +77,16 @@ const RAW_NAV: AdminNavGroup[] = [
     ],
   },
   {
+    label: "Automations",
+    items: [
+      {
+        label: "Message Automations",
+        href: "/admin/message-automations",
+        icon: "broadcast",
+      },
+    ],
+  },
+  {
     label: "Observability",
     items: [
       {
