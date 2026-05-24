@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
@@ -83,8 +84,13 @@ export default async function LeadsPage() {
         <SectionCard padding="none">
           <ul className="divide-y divide-line">
             {rows.map((row) => (
-              <li key={row.id} className="p-4">
-                <LeadRow row={row} />
+              <li key={row.id}>
+                <Link
+                  href={`/admin/leads/${row.id}`}
+                  className="block p-4 transition hover:bg-surface-muted"
+                >
+                  <LeadRow row={row} />
+                </Link>
               </li>
             ))}
           </ul>
