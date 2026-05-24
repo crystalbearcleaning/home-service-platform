@@ -1112,3 +1112,155 @@ button.
   Phase 3D tests: search, validation, retry input checks, nav group).
 - `npm run lint` — clean (0 warnings, 0 errors).
 - `npm run build` — green; 24 admin routes compile (`+ /admin/message-automations`, `+ /admin/message-automations/[automationId]`, `+ /admin/message-automations/recipients`).
+
+---
+
+## Appendix E — Phase 3E quote-flow → automation engine (delivered)
+
+Step 3E wires the existing quote-flow submission to the Phase 3D
+Message Automations engine. The engine fires after the task is created
++ events/activities are published. **Customer submission stays
+resilient — any messaging failure is non-fatal.**
+
+### Engine
+
+`src/core/messaging/automation-engine.ts`
+(`evaluateAutomationsForTaskCreated(input)`) — server-only, single
+entry point. Never throws (wraps an inner function in try/catch so
+even an unexpected exception becomes `{ ok: true, matched: 0,
+outcomes: [] }`).
+
+Flow per call:
+
+1. Load `message_automations` for the business filtered by
+   `trigger_type='task.created'`.
+2. Match by `trigger_filters.category === input.taskContext.taskCategory`
+   via pure `pickAutomationsForTaskCategory`. Disabled automations
+   stay in the matched set so the engine can write a skipped log.
+3. Load `automation_recipients` for every matched id in one round-trip
+   (joined to `notification_recipients` via `!inner`).
+4. For each matched automation:
+   - render template with `renderByTemplateKey(templateKey, ctx)`
+   - on render failure → write one `skipped` log with the template
+     error code
+   - decide outcome via pure `decideAutomationOutcome`:
+     - DISABLED → one `skipped` log (`AUTOMATION_DISABLED`)
+     - NO active recipients → one `skipped` log (`NO_ACTIVE_RECIPIENTS`)
+     - else SEND → one `sendInternalSmsNotification` per active
+       recipient. Phase 3C's engine handles MISSING_CONFIG
+       (writes `skipped` without a network call) and the
+       pending → sent / failed transitions.
+
+### Quote-flow wiring point
+
+`src/plugins/customer-quote-sales-page/submit-contact.ts`, step **11**
+(new), runs **after** the trailing events / activities and **before**
+the success return. The call is wrapped in a try/catch as
+defense-in-depth so any unforeseen exception is logged and the customer
+still receives `{ ok: true, … }`.
+
+Context passed to the engine:
+
+- `taskCategory` / `taskTitle` (from existing mapping helpers)
+- `contactFullName`
+- `formattedAddress` + `addressLine1` + `city` (from
+  `interaction.normalizedAddress`)
+- `selectedPlanLabel` (mapped from `OptionKey`:
+  `one_time → "One-Time Clean"`, `six_month → "Every 6 Months"`,
+  `three_month → "Every 3 Months"`)
+- `selectedTotal`
+- `related`: `relatedTaskId`, `relatedLeadId`, `relatedQuoteId`,
+  `relatedContactId`, `relatedPropertyId` (all stamped onto the
+  notification_logs row)
+
+Customer email is **never** passed to the engine or rendered.
+
+### Trigger → automation → template mapping
+
+| Quote-flow kind | task_category | Seeded automation | template_key |
+|---|---|---|---|
+| `quote_generated` | `schedule_request` | Schedule Request | `internal_schedule_request_v1` |
+| `property_data_missing` | `manual_quote` | Manual Quote Needed | `internal_manual_quote_needed_v1` |
+| `out_of_area` | `service_area_review` | Service Area Review | `internal_service_area_review_v1` |
+
+### Behavior matrix
+
+| Scenario | Engine writes | Network call? |
+|---|---|---|
+| Enabled automation + active recipient + GHL configured | one `pending` log per recipient → `sent` or `failed` | yes |
+| Enabled automation + active recipient + GHL missing | one `skipped` log per recipient (`MISSING_CONFIG`) | no |
+| Enabled automation + no active recipients | one `skipped` log (`NO_ACTIVE_RECIPIENTS`) | no |
+| Disabled automation | one `skipped` log (`AUTOMATION_DISABLED`) | no |
+| Render error (unknown `template_key`) | one `skipped` log with the render error | no |
+| No automation matches the category | no log written | no |
+| Unexpected engine exception | logged to server console; engine returns `matched=0` | no |
+| Anything fails after the task is created | customer still receives `{ ok: true }` confirmation | n/a |
+
+Every log row is stamped with the related task / lead / quote / contact
+/ property ids passed by the orchestrator. These show in the existing
+Phase 3D admin pages without further UI work.
+
+### Failure isolation
+
+- The engine itself returns a discriminated result and never throws.
+- The wiring at `submit-contact.ts:11` adds a redundant try/catch.
+- Even if `notification_logs` writes fail, the engine logs the error
+  and continues. The customer confirmation is constructed and returned
+  unchanged.
+- No SMS error details are ever surfaced to the customer.
+
+### Manual test plan
+
+A — **Enabled `schedule_request`** (default seeded state):
+1. Open `/q`, pick an in-area address with property data.
+2. Choose a plan, submit the contact form.
+3. Customer confirmation renders normally.
+4. `/admin/message-automations` shows a new log row;
+   `/admin/message-automations/{schedule_request id}` shows the same
+   row with `step send_message HTTP 200` on success.
+5. Sam receives one SMS.
+
+B — **Disabled `manual_quote_needed`**:
+1. Disable Manual Quote Needed on its detail page.
+2. Open `/q`, pick an in-area address that returns no sqft from
+   RentCast (manual-quote fallback). Submit contact form.
+3. Customer confirmation renders normally.
+4. The automation detail page shows a new `skipped` log with
+   `error_code=AUTOMATION_DISABLED`. No SMS sent.
+
+C — **Missing / broken GHL config**:
+1. Clear / break `GHL_API_KEY`. Restart dev server.
+2. Submit any `/q` flow that produces a matching task.
+3. Customer confirmation renders normally.
+4. Log row shows `skipped` (`MISSING_CONFIG`) or `failed`
+   (`UPSTREAM_UNAUTHORIZED` with `step contact_upsert`); the existing
+   3C troubleshooting tips render on the message-sms test page.
+
+### Tests added
+
+- `automation-matching.test.ts` (11 cases) — category match, ignores
+  non-`task.created` triggers, ignores null filters, recipient
+  filtering, decision precedence (`AUTOMATION_DISABLED` over
+  `NO_ACTIVE_RECIPIENTS`).
+- `template-context.test.ts` (8 cases) — full / partial / empty
+  contexts, address fallback + city-strip, whitespace handling,
+  numeric total rounding, never includes "email".
+- `automation-engine.test.ts` (3 cases) — pre-flight branches return
+  a no-op without touching Supabase.
+
+### What is intentionally NOT built in Phase 3E
+
+- Lead detail / task completion / notes — Phase 3F.
+- Customer-facing SMS reminders, post-job review requests, email
+  automations, two-way inbox, GHL conversation sync, AI message
+  writing — never in Phase 3.
+- New task categories, new event types, new schema. The Phase 3B
+  tables remain sufficient.
+
+### Quality gates at end of Phase 3E
+
+- `npx tsc --noEmit` — clean (0 errors).
+- `npm run test` — **296 / 296 tests pass** across 33 files (+21 new
+  Phase 3E tests).
+- `npm run lint` — clean (0 warnings, 0 errors).
+- `npm run build` — green; route count unchanged (no new admin pages).

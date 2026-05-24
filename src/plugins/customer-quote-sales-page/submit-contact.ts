@@ -6,6 +6,7 @@ import { createQuoteFromInteraction } from "@/core/quotes/create";
 import { createTask } from "@/core/tasks/create";
 import { publishEvent } from "@/core/events/bus";
 import { createActivity } from "@/core/activity/logger";
+import { evaluateAutomationsForTaskCreated } from "@/core/messaging/automation-engine";
 import { loadQuoteExpirationSetting } from "@/core/business/quote-settings";
 import { WINDOW_CLEANING_AUTO_QUOTE } from "@/plugins/window-cleaning-auto-quote/manifest";
 import { CUSTOMER_QUOTE_SALES_PAGE } from "./manifest";
@@ -404,6 +405,40 @@ async function submitContactAndConvertInner(
     contactName: contact.fullName,
   });
 
+  // ---- 11. Evaluate Message Automations (best-effort; never blocks customer) ----
+  // Phase 3E: feed the just-created task to the messaging engine. The
+  // engine never throws, writes its own notification_logs, and is
+  // wrapped in try/catch here as defense-in-depth so any unexpected
+  // failure cannot affect the customer's confirmation.
+  try {
+    await evaluateAutomationsForTaskCreated({
+      businessId: interaction.businessId,
+      taskId: taskResult.taskId,
+      taskContext: {
+        taskCategory: taskCategoryForKind(kind),
+        taskTitle: taskTitleForKind(kind),
+        contactFullName: contact.fullName,
+        formattedAddress: interaction.normalizedAddress.formatted_address,
+        addressLine1: interaction.normalizedAddress.address_line_1 ?? null,
+        city: interaction.normalizedAddress.city ?? null,
+        selectedPlanLabel: planLabelForOptionKey(selectedOptionKeyForRow),
+        selectedTotal: selectedTotalForRow,
+      },
+      related: {
+        relatedTaskId: taskResult.taskId,
+        relatedLeadId: leadResult.leadId,
+        relatedQuoteId: quoteId,
+        relatedContactId: contactResult.contactId,
+        relatedPropertyId: propertyResult.propertyId,
+      },
+    });
+  } catch (err) {
+    console.error(
+      "[submitContactAndConvert] automation engine failed unexpectedly:",
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+
   return {
     ok: true,
     data: {
@@ -419,6 +454,25 @@ async function submitContactAndConvertInner(
       formattedAddress: interaction.normalizedAddress.formatted_address,
     },
   };
+}
+
+// Maps the internal option key (one_time / six_month / three_month) to
+// the human-readable plan label that appears in the seeded internal SMS
+// templates. Kept inline because it's tiny and tightly coupled to the
+// Phase 1 service-plan seed.
+function planLabelForOptionKey(
+  optionKey: OptionKey | null,
+): string | null {
+  switch (optionKey) {
+    case "one_time":
+      return "One-Time Clean";
+    case "six_month":
+      return "Every 6 Months";
+    case "three_month":
+      return "Every 3 Months";
+    default:
+      return null;
+  }
 }
 
 function buildTaskDescription(input: {
