@@ -12,6 +12,8 @@ Phase 1 is intentionally narrow. Do not overbuild. Do not create future CRM/job/
 
 **Phase 3 work** (Message Automations + lightweight request handling) is governed by `docs/PHASE_3_MESSAGE_AUTOMATIONS_AND_REQUEST_HANDLING.md`. Phase 3 adds an internal-SMS automations area backed by a GoHighLevel adapter, wires quote-flow `task.created` events to it, and ships a lightweight `/admin/leads/[leadId]` detail page with task completion + notes. Customer submission must still succeed if SMS sending fails. Do not build customer-facing automations, email, two-way inbox, conversation sync, AI-written messages, full CRM, scheduling, jobs, invoices, payments, or quote acceptance in Phase 3. See the doc's Do-Not-Build list before extending Phase 3 scope.
 
+**Phase 4 work** (CRM Browser + Light Management) is governed by `docs/PHASE_4_CRM_BROWSER_AND_LIGHT_MANAGEMENT.md`. Phase 4 reorganizes admin nav around Contacts + Quotes, builds `/admin/contacts` (list + customer hub detail), adds a `/admin/quotes/[quoteId]` detail page, light editing for contact name/phone/email, contact notes, simple search/filter on contacts/quotes/tasks, and moves Quote Interactions to Observability. Properties stay attached under Contacts (no top-level page). Do not build manual contact/property/lead/quote creation, quote editing or status workflow, jobs, invoices, scheduling, appointments, payments, pipeline boards, import/export, customer messaging, AI expansion, dashboard redesign, or any new database schema in Phase 4. See the doc's Do-Not-Build list before extending Phase 4 scope.
+
 ## Phase 1 Goal
 
 Build the smallest working vertical slice that proves the platform architecture:

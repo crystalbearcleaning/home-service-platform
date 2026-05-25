@@ -35,20 +35,33 @@ landed in Phase 2A. The source-of-truth design doc is:
 Future `/admin/*` pages must use the shared shell + components defined
 in that doc.
 
-Phase 3 is the **Message Automations + lightweight request handling**
-phase. It adds an internal-SMS automations admin area backed by a
-GoHighLevel adapter, wires the existing quote-flow `task.created`
-events to it, and ships a lightweight `/admin/leads/[leadId]` detail
-page with task completion + internal notes. The source-of-truth design
-doc for Phase 3 is:
+Phase 3 is **complete** — see `docs/PHASE_3_QA_REPORT.md`. The
+internal-SMS Message Automations area (GoHighLevel adapter, three
+seeded automations, recipients management, retry plumbing),
+quote-flow `task.created` wiring, and the lightweight
+`/admin/leads/[leadId]` detail page with task completion + notes all
+shipped. Customer quote submission stays resilient when SMS fails.
+Source-of-truth doc:
 
 - `docs/PHASE_3_MESSAGE_AUTOMATIONS_AND_REQUEST_HANDLING.md`
 
-Phase 3 stays narrow: no customer-facing automations, no email, no
-two-way inbox, no conversation sync, no AI message writing, no full
-CRM, no scheduling / jobs / invoices / payments / quote acceptance.
-Customer quote submission must still succeed even if SMS sending fails.
-See the doc's Do-Not-Build list before extending Phase 3 scope.
+Phase 4 is the **CRM Browser + Light Management** phase. It
+reorganizes the admin nav around Contacts and Quotes, builds
+`/admin/contacts` (list + customer hub detail) and a
+`/admin/quotes/[quoteId]` detail page, adds light editing for contact
+name / phone / email, contact notes, simple search/filter on
+contacts / quotes / tasks, and moves Quote Interactions under
+Observability. Properties stay attached under Contacts (no top-level
+page). The source-of-truth design doc for Phase 4 is:
+
+- `docs/PHASE_4_CRM_BROWSER_AND_LIGHT_MANAGEMENT.md`
+
+Phase 4 stays narrow: no manual contact / property / lead / quote
+creation, no quote editing or status workflow, no jobs / invoices /
+scheduling / appointments / payments, no pipeline boards or
+import/export, no customer messaging, no AI expansion, no dashboard
+redesign, and no new database schema. See the doc's Do-Not-Build list
+before extending Phase 4 scope.
 
 ---
 
