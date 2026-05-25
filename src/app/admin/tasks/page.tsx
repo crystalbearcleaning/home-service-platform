@@ -11,11 +11,21 @@ import {
   resolveAdminShellContext,
   type StatusTone,
 } from "@/components/admin";
+import {
+  filterTasks,
+  TASK_CATEGORY_VALUES,
+  TASK_STATUS_VALUES,
+} from "@/core/tasks/admin-filter";
 import { SignOutButton } from "../sign-out-button";
+import { TasksFilterClient } from "./tasks-filter-client";
 
 export const dynamic = "force-dynamic";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 100;
+
+type PageProps = {
+  searchParams?: Promise<{ status?: string; category?: string }>;
+};
 
 type Row = {
   id: string;
@@ -30,7 +40,7 @@ type Row = {
   source_plugin_key: string | null;
 };
 
-export default async function TasksPage() {
+export default async function TasksPage({ searchParams }: PageProps) {
   const supabase = await createClient();
   const {
     data: { user },
@@ -54,15 +64,24 @@ export default async function TasksPage() {
     .order("created_at", { ascending: false })
     .limit(PAGE_SIZE);
 
-  const rows = (data ?? []) as Row[];
+  const allRows = (data ?? []) as Row[];
+  const params = (await searchParams) ?? {};
+  const statusFilter = (params.status ?? "").trim();
+  const categoryFilter = (params.category ?? "").trim();
+
+  const filteredRows = filterTasks(
+    allRows.map((r) => ({ ...r, taskCategory: r.task_category })),
+    { status: statusFilter, category: categoryFilter },
+  );
 
   // Batched lead→contact lookup so each lead-related task row can link
   // to its customer. Tasks tie to leads via the soft reference
   // (related_object_type='lead' AND related_object_id=lead.id), which
-  // isn't a true FK PostgREST can join on — so we do one extra query.
+  // isn't a true FK PostgREST can join on — so we do one extra query
+  // (scoped to the filtered rows only).
   const leadIds = Array.from(
     new Set(
-      rows
+      filteredRows
         .filter((r) => r.related_object_type === "lead" && r.related_object_id)
         .map((r) => r.related_object_id as string),
     ),
@@ -98,27 +117,49 @@ export default async function TasksPage() {
             Failed to load tasks: {error.message}
           </p>
         </SectionCard>
-      ) : rows.length === 0 ? (
+      ) : allRows.length === 0 ? (
         <EmptyState
           title="No tasks yet"
           description="Each /q submission creates a task here — schedule follow-up, manual quote, or area review."
         />
       ) : (
-        <SectionCard padding="none">
-          <ul className="divide-y divide-line">
-            {rows.map((row) => {
-              const contactId =
-                row.related_object_type === "lead" && row.related_object_id
-                  ? (contactByLead.get(row.related_object_id) ?? null)
-                  : null;
-              return (
-                <li key={row.id} className="p-4">
-                  <TaskRow row={row} contactId={contactId} />
-                </li>
-              );
-            })}
-          </ul>
-        </SectionCard>
+        <>
+          <SectionCard>
+            <TasksFilterClient
+              initialStatus={statusFilter}
+              initialCategory={categoryFilter}
+              statusOptions={[...TASK_STATUS_VALUES]}
+              categoryOptions={[...TASK_CATEGORY_VALUES]}
+              showingCount={filteredRows.length}
+              totalCount={allRows.length}
+            />
+          </SectionCard>
+          <div className="mt-4">
+            {filteredRows.length === 0 ? (
+              <SectionCard>
+                <p className="text-xs text-ink-muted">
+                  No tasks match the current filter.
+                </p>
+              </SectionCard>
+            ) : (
+              <SectionCard padding="none">
+                <ul className="divide-y divide-line">
+                  {filteredRows.map((row) => {
+                    const contactId =
+                      row.related_object_type === "lead" && row.related_object_id
+                        ? (contactByLead.get(row.related_object_id) ?? null)
+                        : null;
+                    return (
+                      <li key={row.id} className="p-4">
+                        <TaskRow row={row} contactId={contactId} />
+                      </li>
+                    );
+                  })}
+                </ul>
+              </SectionCard>
+            )}
+          </div>
+        </>
       )}
     </AdminShell>
   );

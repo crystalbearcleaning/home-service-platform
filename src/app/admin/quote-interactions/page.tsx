@@ -79,9 +79,9 @@ export default async function QuoteInteractionsPage() {
       stagingToolsEnabled={shell.stagingToolsEnabled}
     >
       <PageHeader
-        eyebrow="Business Records"
+        eyebrow="Observability"
         title="Quote interactions"
-        description={`Source / debug view of public /q submissions. One row per address lookup including out-of-area and missing-data attempts. Most recent ${PAGE_SIZE}.`}
+        description={`Source / audit / debug view of public /q submissions. One row per address lookup — out-of-area, missing-data, and converted attempts all land here. Most recent ${PAGE_SIZE}.`}
       />
 
       {error ? (
@@ -209,7 +209,11 @@ function InteractionRow({ row }: { row: Row }) {
       {converted && (
         <dl className="mt-3 grid grid-cols-1 gap-x-4 gap-y-1 border-t border-line pt-3 text-[11px] sm:grid-cols-2">
           {row.converted_contact_id && (
-            <IdLink label="contact" id={row.converted_contact_id} />
+            <IdLink
+              label="contact"
+              id={row.converted_contact_id}
+              href={`/admin/contacts/${row.converted_contact_id}`}
+            />
           )}
           {row.converted_property_id && (
             <IdLink label="property" id={row.converted_property_id} />
@@ -218,14 +222,14 @@ function InteractionRow({ row }: { row: Row }) {
             <IdLink
               label="lead"
               id={row.converted_lead_id}
-              href="/admin/leads"
+              href={`/admin/leads/${row.converted_lead_id}`}
             />
           )}
           {row.converted_quote_id && (
             <IdLink
               label="quote"
               id={row.converted_quote_id}
-              href="/admin/quotes"
+              href={`/admin/quotes/${row.converted_quote_id}`}
             />
           )}
         </dl>
