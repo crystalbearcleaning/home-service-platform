@@ -182,7 +182,7 @@ export default async function ContactDetailPage({ params }: Props) {
                   <li key={q.id} className="py-2 text-xs">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <Link
-                        href="/admin/quotes"
+                        href={`/admin/quotes/${q.id}`}
                         className="text-ink underline-offset-2 hover:underline"
                       >
                         Quote {q.id.slice(0, 8)}…
