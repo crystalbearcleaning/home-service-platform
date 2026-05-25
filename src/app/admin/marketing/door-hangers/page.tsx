@@ -30,6 +30,7 @@ import {
   RouteCreateForm,
   SessionCreateForm,
 } from "./forms";
+import { RentcastRouteGenerator } from "./rentcast-route-form";
 
 export const dynamic = "force-dynamic";
 
@@ -151,7 +152,10 @@ export default async function DoorHangersDashboardPage() {
               ))}
             </ul>
           )}
-          <div className="mt-3">
+          <div className="mt-3 space-y-3">
+            <RentcastRouteGenerator
+              campaigns={campaigns.map((c) => ({ id: c.id, name: c.name }))}
+            />
             <RouteCreateForm
               campaigns={campaigns.map((c) => ({ id: c.id, name: c.name }))}
             />

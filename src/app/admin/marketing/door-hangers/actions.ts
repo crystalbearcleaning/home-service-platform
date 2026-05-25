@@ -13,6 +13,15 @@ import {
   minutesToSeconds,
   parseDollarsToCents,
 } from "@/core/door-hanger/calculations";
+import {
+  generateRoutePreview,
+  saveRentcastRoute,
+} from "@/core/door-hanger/rentcast-route";
+import type { CandidatePreview } from "@/core/door-hanger/rentcast-candidates";
+import {
+  DOOR_HANGER_ROUTE_STATUSES,
+  type DoorHangerRouteStatus,
+} from "@/plugins/door-hanger";
 
 // =========================================================================
 // Phase 5B-2 Door Hanger admin server actions.
@@ -235,6 +244,79 @@ export async function createDistributionSessionAction(input: {
       timeSpentSeconds: timeParse.seconds,
       notes: input.notes ?? null,
     },
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  revalidate();
+  return { ok: true, data: result.data };
+}
+
+// -------------------------------------------------------------------------
+// RentCast route generation (Phase 5C) — preview + save.
+// Preview fires ONE RentCast batch search. Save makes zero RentCast calls.
+// -------------------------------------------------------------------------
+export async function previewRentcastRouteAction(input: {
+  centerPlaceId: string;
+  radiusMiles: number;
+  targetHomeCount: number;
+  propertyType?: string | null;
+}): Promise<
+  Result<{
+    centerAddress: string;
+    centerLatitude: number;
+    centerLongitude: number;
+    radiusMiles: number;
+    targetHomeCount: number;
+    propertyType: string | null;
+    candidates: CandidatePreview[];
+    estimatedRentcastRequests: 1;
+  }>
+> {
+  const auth = await requireBusiness();
+  if (!auth.ok) return auth;
+
+  const result = await generateRoutePreview({
+    centerPlaceId: input.centerPlaceId,
+    radiusMiles: input.radiusMiles,
+    targetHomeCount: input.targetHomeCount,
+    propertyType: input.propertyType ?? null,
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+  return { ok: true, data: result.data };
+}
+
+export async function saveRentcastRouteAction(input: {
+  name: string;
+  campaignId?: string | null;
+  notes?: string | null;
+  status?: string | null;
+  centerAddress: string;
+  centerLatitude: number;
+  centerLongitude: number;
+  radiusMiles: number;
+  targetHomeCount: number;
+  candidates: CandidatePreview[];
+}): Promise<Result<{ routeId: string; totalRouteStops: number }>> {
+  const auth = await requireBusiness();
+  if (!auth.ok) return auth;
+
+  const status: DoorHangerRouteStatus =
+    input.status &&
+    (DOOR_HANGER_ROUTE_STATUSES as readonly string[]).includes(input.status)
+      ? (input.status as DoorHangerRouteStatus)
+      : "draft";
+
+  const result = await saveRentcastRoute({
+    businessId: auth.businessId,
+    name: input.name,
+    campaignId: input.campaignId ?? null,
+    centerAddress: input.centerAddress,
+    centerLatitude: input.centerLatitude,
+    centerLongitude: input.centerLongitude,
+    radiusMiles: input.radiusMiles,
+    targetHomeCount: input.targetHomeCount,
+    status,
+    notes: input.notes ?? null,
+    candidates: input.candidates,
   });
   if (!result.ok) return { ok: false, error: result.error };
   revalidate();

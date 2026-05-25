@@ -855,3 +855,54 @@ operator runs `supabase db push` (or equivalent) and
 `supabase/seed/run_seed.sh` when ready. Re-applying is safe: the seed
 is idempotent and the migration uses `DROP POLICY IF EXISTS` for all
 RLS policies.
+
+---
+
+## Appendix C — Phase 5C RentCast route generation (delivered)
+
+**Status:** address-centered route generation. UI lives at
+`/admin/marketing/door-hangers` under the existing **Routes** section.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/core/door-hanger/rentcast-candidates.ts` (+ test, 16 cases) | Pure helpers: target clamp (≤500), search-query builder, candidate safe-subset normaliser, dedup + cap, Haversine distance, generation-input validator, `RENTCAST_PREVIEW_REQUEST_COUNT = 1`. |
+| `src/core/property-data/rentcast-search.ts` | Server-only `searchPropertiesByRadius` — ONE `GET /v1/properties?latitude=…&longitude=…&radius=…&limit=…&propertyType=…` per call. |
+| `src/core/door-hanger/rentcast-route.ts` | Server-only orchestrator: `generateRoutePreview` (validate → Google `getPlaceDetails`+`normalizeAddress` → clamp → ONE RentCast call → normalise) and `saveRentcastRoute` (insert route + route_stops; zero RentCast calls). |
+| `src/app/admin/marketing/door-hangers/actions.ts` | `previewRentcastRouteAction` + `saveRentcastRouteAction`. |
+| `src/app/admin/marketing/door-hangers/rentcast-route-form.tsx` | Client component: settings → preview → save. |
+| `src/app/admin/marketing/door-hangers/page.tsx` | Wires the generator into the Routes section above the manual route form. |
+
+### Behaviour
+
+- **Address-centered.** Operator picks a center address via
+  `GoogleAutocomplete`; we geocode through the existing core geo
+  provider, so RentCast receives `latitude` / `longitude` / `radius`
+  rather than a string address.
+- **One batch RentCast request per preview.** UI surfaces
+  "Estimated RentCast requests: 1" before generation. The save path
+  uses the preview payload only — **zero additional RentCast calls**.
+- **Target capped at 500.** RentCast's batch limit. Requests above
+  that surface a friendly `OVER_BATCH_LIMIT` message; pagination is
+  out of scope for Phase 5C.
+- **Safe subset only.** Each candidate is normalised through
+  `normalizeRentcastCandidate`; persisted `rentcast_snapshot` mirrors
+  the existing property-data safe-subset shape (eight basic
+  dimensions). Owner info / sale history / tax data are dropped.
+- **Preview before save.** Operator sees candidate list with
+  checkboxes (default all selected), can deselect bad fits, then
+  saves. Save button label includes "(N stops, 0 RentCast requests)".
+- **Route persistence.** `door_hanger_routes.generated_from_source =
+  'rentcast'`; `center_address`, `center_lat`, `center_lng`,
+  `radius_miles`, `target_home_count`, `total_route_stops`, optional
+  `campaign_id`, status (`draft` or `ready`). One `door_hanger_route_stops`
+  row per selected candidate.
+- **No CRM, no simulation, no maps, no GPS, no optimization, no edit/delete.**
+
+### Tests
+
+40 new pure tests covering: preview-request-count constant = 1,
+clamp ≤ 500, query-string shape, candidate dedup + cap, safe-subset
+projection (asserts owner / sale-history fields are absent), Haversine
+~0 self-distance, and form-input validation.
