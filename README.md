@@ -75,6 +75,30 @@ and no edit/delete/archive UI. Phase 5 may include new schema for the
 Door Hanger Plugin in Phase 5B if explicitly approved. See Appendix A
 Do-Not-Build list before extending Phase 5 scope.
 
+Phase 5 is **complete** — see `docs/PHASE_5_QA_REPORT.md` for the
+sign-off.
+
+Phase 6 is the **Simulation Workspace + Save Files Foundation**
+phase. It builds the safe container for simulation before any
+gameplay: a separate `Crystal Bear Simulation` workspace, a
+save / run model (name, starting cash, simulated date/time, status),
+a small workspace switcher + Simulation Mode banner, and the first
+side-effect guardrail so simulation never triggers real SMS / email /
+payment calls. Phase 6A is **docs only**. The source-of-truth
+design doc is:
+
+- `docs/PHASE_6_SIMULATION_WORKSPACE_AND_SAVE_FILES.md`
+
+Phase 6 stays narrow: no Door Hanger Hang 1 / Hang Route gameplay,
+no simulated quote requests, no CRM lead / quote / task generation
+from simulation, no delayed customer responses, no message
+automation outcomes, no GPS / maps / route execution, no route
+optimization, no worker app, no jobs / invoices / scheduling, no
+customer messaging, no full game loop, no full plugin builder /
+marketplace, no data import / export, no AI / context-engine
+expansion, and no edit / delete / archive flows on save files. See
+§10 of the Phase 6 doc before extending scope.
+
 ---
 
 ## Tech Stack
