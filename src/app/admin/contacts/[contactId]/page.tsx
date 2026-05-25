@@ -13,6 +13,10 @@ import {
 } from "@/components/admin";
 import { getAdminContactDetail } from "@/core/contacts/admin-data";
 import { SignOutButton } from "../../sign-out-button";
+import {
+  ContactNotesPanel,
+  CustomerInfoEditor,
+} from "./contact-detail-client";
 
 export const dynamic = "force-dynamic";
 
@@ -63,24 +67,20 @@ export default async function ContactDetailPage({ params }: Props) {
         }
       />
 
-      <SectionCard
-        title="Customer info"
-        description="Editing comes in Phase 4C. Read-only for now."
-      >
-        <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
-          <dt className="text-ink-muted">name</dt>
-          <dd className="text-ink">{detail.contact.fullName}</dd>
-          <dt className="text-ink-muted">phone</dt>
-          <dd className="font-mono text-ink">{detail.contact.phone}</dd>
-          <dt className="text-ink-muted">email</dt>
-          <dd className="font-mono text-ink">{detail.contact.email}</dd>
-          {detail.contact.source && (
-            <>
-              <dt className="text-ink-muted">source</dt>
-              <dd className="text-ink">{detail.contact.source}</dd>
-            </>
-          )}
-        </dl>
+      <SectionCard title="Customer info">
+        <CustomerInfoEditor
+          initial={{
+            id: detail.contact.id,
+            fullName: detail.contact.fullName,
+            phone: detail.contact.phone,
+            email: detail.contact.email,
+          }}
+        />
+        {detail.contact.source && (
+          <p className="mt-3 text-[11px] text-ink-faint">
+            source: <span className="font-mono text-ink-muted">{detail.contact.source}</span>
+          </p>
+        )}
       </SectionCard>
 
       <div className="mt-6">
@@ -250,24 +250,16 @@ export default async function ContactDetailPage({ params }: Props) {
       <div className="mt-6">
         <SectionCard
           title="Notes"
-          description="Read-only in Phase 4B. Editing arrives in Phase 4C."
+          description="Plain-text internal notes. Visible to the team only."
         >
-          {detail.notes.length === 0 ? (
-            <p className="text-xs text-ink-muted">No notes on this contact yet.</p>
-          ) : (
-            <ul className="divide-y divide-line">
-              {detail.notes.map((n) => (
-                <li key={n.id} className="py-2 text-xs">
-                  <div className="font-mono text-[11px] text-ink-faint">
-                    {new Date(n.createdAt).toLocaleString()}
-                  </div>
-                  <div className="mt-0.5 whitespace-pre-wrap text-ink">
-                    {n.body}
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+          <ContactNotesPanel
+            contactId={detail.contact.id}
+            initial={detail.notes.map((n) => ({
+              id: n.id,
+              body: n.body,
+              createdAt: n.createdAt,
+            }))}
+          />
         </SectionCard>
       </div>
 
