@@ -1043,6 +1043,120 @@ Do not build a pricing editor in Phase 1.
 
 ---
 
+## 22b. Door Hanger Plugin (Phase 5B-1)
+
+Plugin-owned tables for the Door Hanger marketing-channel plugin.
+Migration: `supabase/migrations/20260525120000_phase_5_door_hanger.sql`.
+Source-of-truth doc: `docs/PHASE_5_DOOR_HANGER_PLUGIN_AND_SIMULATION_ARCHITECTURE.md`
+(Appendix A — Phase 5A-2 product/design addendum).
+
+Phase 5B-1 ships the data model only — no admin UI, no RentCast route
+generation, no simulation, no CRM lead generation from door hangers.
+All money is stored as `bigint` **cents** to avoid floating-point
+math. RLS follows Pattern B (members SELECT only; writes via
+controlled admin server actions using the service-role client).
+
+### `door_hanger_designs`
+
+Inventory line-items / printed designs.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` / `business_id` | uuid | standard |
+| `name` | text NOT NULL | |
+| `version_or_offer` | text NULLABLE | optional label |
+| `quantity_received` | integer NOT NULL | CHECK >= 0 |
+| `quantity_used` | integer NOT NULL default 0 | CHECK >= 0 AND <= received |
+| `total_print_cost_cents` | bigint NULLABLE | what the printer charged |
+| `cost_per_hanger_cents` | bigint NULLABLE | optionally cached = total / received |
+| `received_at` | date NULLABLE | |
+| `notes` | text NULLABLE | |
+| timestamps | standard | |
+
+### `door_hanger_campaigns`
+
+Campaign-first organizing object. Assumption fields support future ROI
+and simulation but stay optional in Phase 5B.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` / `business_id` | uuid | |
+| `name` | text NOT NULL | |
+| `offer_summary` / `target_area` / `notes` | text NULLABLE | |
+| `status` | text NOT NULL default 'draft' | CHECK in (draft, active, paused, complete) |
+| `response_rate_assumption` | numeric(6,4) NULLABLE | 0 ≤ x ≤ 1 |
+| `quote_to_booking_assumption` | numeric(6,4) NULLABLE | 0 ≤ x ≤ 1 |
+| `average_job_value_cents` | bigint NULLABLE | |
+| timestamps | standard | |
+
+### `door_hanger_routes`
+
+Route shell. `generated_from_source='manual'` is the Phase 5B fallback;
+`'rentcast'` lands in Phase 5C.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` / `business_id` | uuid | |
+| `campaign_id` | uuid NULLABLE FK | ON DELETE SET NULL |
+| `name` | text NOT NULL | |
+| `center_address` | text NULLABLE | |
+| `center_lat` / `center_lng` | numeric(10,7) NULLABLE | |
+| `radius_miles` | numeric(6,2) NULLABLE | CHECK > 0 |
+| `target_home_count` | integer NULLABLE | CHECK > 0 |
+| `generated_from_source` | text NOT NULL default 'manual' | CHECK in (manual, rentcast) |
+| `status` | text NOT NULL default 'draft' | CHECK in (draft, ready, in_progress, completed, paused) |
+| `total_route_stops` | integer NOT NULL default 0 | CHECK >= 0 |
+| `estimated_time_seconds` | integer NULLABLE | CHECK >= 0 |
+| `notes` | text NULLABLE | |
+| timestamps | standard | |
+
+### `door_hanger_route_stops`
+
+One row per candidate / actual home on a route. Designed for the Phase
+5C RentCast generation flow.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` / `business_id` | uuid | |
+| `route_id` | uuid NOT NULL FK | ON DELETE CASCADE |
+| `stop_order` | integer NULLABLE | CHECK >= 0 when set |
+| `address` | text NOT NULL | |
+| `city` / `state` / `postal_code` | text NULLABLE | |
+| `lat` / `lng` | numeric(10,7) NULLABLE | |
+| `property_type` | text NULLABLE | |
+| `square_footage` | integer NULLABLE | CHECK >= 0 |
+| `estimated_value_cents` | bigint NULLABLE | |
+| `rentcast_snapshot` | jsonb NULLABLE | safe-subset of provider response |
+| `status` | text NOT NULL default 'pending' | CHECK in (pending, completed, skipped) |
+| timestamps | standard | |
+
+### `door_hanger_distribution_sessions`
+
+One row per distribution session. Phase 5B writes only `mode='real'`;
+Phase 6+ simulation will write `mode='simulated'` through the same
+table.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` / `business_id` | uuid | |
+| `campaign_id` / `route_id` / `design_id` | uuid NULLABLE FK | ON DELETE SET NULL |
+| `distributed_at` | timestamptz NOT NULL | |
+| `hangers_distributed` | integer NOT NULL | CHECK >= 0 |
+| `time_spent_seconds` | integer NULLABLE | CHECK >= 0 |
+| `material_cost_cents` | bigint NULLABLE | display helper |
+| `notes` | text NULLABLE | |
+| `mode` | text NOT NULL default 'real' | CHECK in (real, simulated) |
+| timestamps | standard | |
+
+### Seed (Phase 5B-1)
+
+- One `plugin_definitions` row for `door_hanger` (v0.1.0, internal).
+- One `installed_plugins` row per Crystal Bear (`status='enabled'`).
+- **No** demo campaigns / inventory / routes / sessions — operator
+  creates these manually once the Marketing UI ships in Phase 5B-2.
+
+---
+
 ## 23. Deferred Tables
 
 Do not implement these in Phase 1 unless explicitly re-scoped later:
@@ -1055,8 +1169,6 @@ Do not implement these in Phase 1 unless explicitly re-scoped later:
 - receipts
 - recurring service agreements
 - job pool
-- door hanger routes
-- door hanger route stops
 - technician workflows
 - workflow blueprints/instances
 - files/attachments

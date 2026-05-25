@@ -45,23 +45,35 @@ Source-of-truth doc:
 
 - `docs/PHASE_3_MESSAGE_AUTOMATIONS_AND_REQUEST_HANDLING.md`
 
-Phase 4 is the **CRM Browser + Light Management** phase. It
-reorganizes the admin nav around Contacts and Quotes, builds
-`/admin/contacts` (list + customer hub detail) and a
-`/admin/quotes/[quoteId]` detail page, adds light editing for contact
-name / phone / email, contact notes, simple search/filter on
-contacts / quotes / tasks, and moves Quote Interactions under
-Observability. Properties stay attached under Contacts (no top-level
-page). The source-of-truth design doc for Phase 4 is:
+Phase 4 is **complete** — see `docs/PHASE_4_QA_REPORT.md`. The CRM
+nav (Contacts + Quotes), customer-hub contact detail, contact
+editing + notes, quote detail with search + status filter, task
+status + category filters, and Quote Interactions moved to
+Observability all shipped. Source-of-truth doc:
 
 - `docs/PHASE_4_CRM_BROWSER_AND_LIGHT_MANAGEMENT.md`
 
-Phase 4 stays narrow: no manual contact / property / lead / quote
-creation, no quote editing or status workflow, no jobs / invoices /
-scheduling / appointments / payments, no pipeline boards or
-import/export, no customer messaging, no AI expansion, no dashboard
-redesign, and no new database schema. See the doc's Do-Not-Build list
-before extending Phase 4 scope.
+Phase 5 is the **Door Hanger Plugin + Address-Based RentCast Route
+Generation** phase. It ships the first real marketing-channel plugin
+(Door Hanger: campaigns, inventory, routes, distribution sessions)
+under a new **Marketing** nav group at
+`/admin/marketing/door-hangers`, plus RentCast-backed route
+generation from a center address. The simulator architecture remains
+documented but the **simulation loop is pushed to Phase 6+** — Phase
+5 only builds real capability. Create-only first (no edit/delete/
+archive flows). The source-of-truth design doc for Phase 5 is
+**Appendix A** of:
+
+- `docs/PHASE_5_DOOR_HANGER_PLUGIN_AND_SIMULATION_ARCHITECTURE.md`
+
+Phase 5 stays narrow: no simulation loop, no CRM lead generation from
+door hangers (Phase 6 earliest), no GPS / maps / route optimization,
+no worker mobile app, no commissions, no customer SMS triggers, no
+jobs / invoices / scheduling, no data import/export, no full
+simulation outcomes or game loop, no AI / context-engine expansion,
+and no edit/delete/archive UI. Phase 5 may include new schema for the
+Door Hanger Plugin in Phase 5B if explicitly approved. See Appendix A
+Do-Not-Build list before extending Phase 5 scope.
 
 ---
 
