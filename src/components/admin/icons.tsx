@@ -19,7 +19,8 @@ export type AdminIconKey =
   | "shield"
   | "menu"
   | "close"
-  | "broadcast";
+  | "broadcast"
+  | "megaphone";
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
@@ -121,6 +122,12 @@ const ICONS: Record<AdminIconKey, (props: IconProps) => React.ReactElement> = {
       <path d="M15.5 8.5a5 5 0 0 1 0 7" />
       <path d="M6 6a8.5 8.5 0 0 0 0 12" />
       <path d="M18 6a8.5 8.5 0 0 1 0 12" />
+    </Base>
+  ),
+  megaphone: (p) => (
+    <Base {...p}>
+      <path d="M4 10v4a1 1 0 0 0 1 1h3l8 4V5L8 9H5a1 1 0 0 0-1 1Z" />
+      <path d="M18 9a3 3 0 0 1 0 6" />
     </Base>
   ),
 };

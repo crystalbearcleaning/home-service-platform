@@ -15,17 +15,36 @@ describe("resolveAdminNav", () => {
     expect(withoutHrefs).not.toContain("/admin/staging-tools");
   });
 
-  it("exposes the Phase 4 group order", () => {
+  it("exposes the Phase 5 group order (Marketing inserted between Tasks and Automations)", () => {
     const groups = resolveAdminNav({ stagingToolsEnabled: false });
     expect(groups.map((g) => g.label)).toEqual([
       "Overview",
       "CRM",
       "Tasks",
+      "Marketing",
       "Automations",
       "Plugins",
       "Observability",
       "Tools",
     ]);
+  });
+
+  it("Marketing group contains exactly Door Hangers", () => {
+    const groups = resolveAdminNav({ stagingToolsEnabled: false });
+    const marketing = groups.find((g) => g.label === "Marketing");
+    expect(marketing).toBeDefined();
+    expect(marketing?.items.map((i) => i.href)).toEqual([
+      "/admin/marketing/door-hangers",
+    ]);
+  });
+
+  it("does not include Facebook Ads / Google Ads / Referrals / SEO placeholders", () => {
+    const groups = resolveAdminNav({ stagingToolsEnabled: true });
+    const hrefs = groups.flatMap((g) => g.items.map((i) => i.href));
+    expect(hrefs).not.toContain("/admin/marketing/facebook-ads");
+    expect(hrefs).not.toContain("/admin/marketing/google-ads");
+    expect(hrefs).not.toContain("/admin/marketing/referrals");
+    expect(hrefs).not.toContain("/admin/marketing/seo");
   });
 
   it("CRM group contains exactly Contacts + Quotes (in that order)", () => {

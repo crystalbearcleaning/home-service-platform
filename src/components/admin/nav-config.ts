@@ -64,6 +64,16 @@ const RAW_NAV: AdminNavGroup[] = [
     ],
   },
   {
+    label: "Marketing",
+    items: [
+      {
+        label: "Door Hangers",
+        href: "/admin/marketing/door-hangers",
+        icon: "megaphone",
+      },
+    ],
+  },
+  {
     label: "Automations",
     items: [
       {
