@@ -191,7 +191,7 @@ export default async function LeadDetailPage({ params }: Props) {
         </Link>
       </div>
       <PageHeader
-        eyebrow="Business Records"
+        eyebrow="CRM"
         title={
           contact?.full_name
             ? `Lead: ${contact.full_name}`
@@ -205,7 +205,19 @@ export default async function LeadDetailPage({ params }: Props) {
         }
       />
 
-      <SectionCard title="Contact">
+      <SectionCard
+        title="Contact"
+        actions={
+          contact ? (
+            <Link
+              href={`/admin/contacts/${contact.id}`}
+              className="text-xs text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+            >
+              Open customer hub →
+            </Link>
+          ) : null
+        }
+      >
         {contact ? (
           <dl className="grid grid-cols-1 gap-x-4 gap-y-1 text-xs sm:grid-cols-2">
             <dt className="text-ink-muted">name</dt>

@@ -1,14 +1,14 @@
 import type { AdminIconKey } from "./icons";
 
 // =========================================================================
-// Admin navigation source-of-truth (Phase 2A).
+// Admin navigation source-of-truth.
 //
-// Mirrors `docs/PHASE_2_ADMIN_ORGANIZATION_AND_DESIGN.md` §3. Edits to
-// this file change the sidebar / mobile drawer everywhere.
+// Phase 4B reorganisation: CRM (Contacts + Quotes) is the primary
+// records area; Tasks lives in its own group; Quote interactions moves
+// under Observability. Leads list stays reachable for now (secondary
+// CRM entry — primary navigation to leads is via contact detail).
 //
-// Phase 2A only DEFINES the structure — no admin pages are migrated to
-// the shell yet. Step 2B wraps every route in <AdminShell> and removes
-// inline "← Admin" links so this becomes the single source of truth.
+// Mirrors §3 of docs/PHASE_4_CRM_BROWSER_AND_LIGHT_MANAGEMENT.md.
 // =========================================================================
 
 export type AdminNavItem = {
@@ -23,13 +23,10 @@ export type AdminNavGroup = {
   items: AdminNavItem[];
 };
 
-// Inputs the nav uses to decide whether a gated item appears.
 export type AdminNavGate = {
   stagingToolsEnabled: boolean;
 };
 
-// Static structure. Resolve via `resolveAdminNav(gate)` to get the
-// final list with gated items filtered out.
 const RAW_NAV: AdminNavGroup[] = [
   {
     label: "Overview",
@@ -42,26 +39,11 @@ const RAW_NAV: AdminNavGroup[] = [
     ],
   },
   {
-    label: "Plugins",
+    label: "CRM",
     items: [
       {
-        label: "Installed plugins",
-        href: "/admin/plugins",
-        icon: "puzzle",
-      },
-    ],
-  },
-  {
-    label: "Business Records",
-    items: [
-      {
-        label: "Quote interactions",
-        href: "/admin/quote-interactions",
-        icon: "inbox",
-      },
-      {
-        label: "Leads",
-        href: "/admin/leads",
+        label: "Contacts",
+        href: "/admin/contacts",
         icon: "users",
       },
       {
@@ -69,6 +51,11 @@ const RAW_NAV: AdminNavGroup[] = [
         href: "/admin/quotes",
         icon: "document",
       },
+    ],
+  },
+  {
+    label: "Tasks",
+    items: [
       {
         label: "Tasks",
         href: "/admin/tasks",
@@ -87,8 +74,23 @@ const RAW_NAV: AdminNavGroup[] = [
     ],
   },
   {
+    label: "Plugins",
+    items: [
+      {
+        label: "Installed plugins",
+        href: "/admin/plugins",
+        icon: "puzzle",
+      },
+    ],
+  },
+  {
     label: "Observability",
     items: [
+      {
+        label: "Quote interactions",
+        href: "/admin/quote-interactions",
+        icon: "inbox",
+      },
       {
         label: "Activity",
         href: "/admin/activity",
@@ -118,15 +120,15 @@ const RAW_NAV: AdminNavGroup[] = [
   },
 ];
 
-// IMPORTANT — the individual test routes
-//   /admin/geo-test
-//   /admin/property-data-test
-//   /admin/auto-quote-test
-//   /admin/rate-limit-test
-// are NOT in the sidebar. They live behind /admin/testing (created in
-// Step 2B). Direct URLs still work; the hub is just the canonical entry.
+// /admin/leads is intentionally NOT in the sidebar (Phase 4 treats
+// leads as related request/opportunity records accessed via contact
+// detail). The route is still reachable via direct URL and via every
+// link sweep target (contact detail, quote interactions, etc.).
+//
+// Individual test routes (/admin/geo-test, /admin/property-data-test,
+// /admin/auto-quote-test, /admin/rate-limit-test) are also not in the
+// sidebar; they live behind /admin/testing.
 
-// Hrefs that require the staging-tools gate to be enabled.
 const STAGING_GATED_HREFS = new Set(["/admin/staging-tools"]);
 
 export function resolveAdminNav(gate: AdminNavGate): AdminNavGroup[] {
@@ -141,11 +143,6 @@ export function resolveAdminNav(gate: AdminNavGate): AdminNavGroup[] {
   })).filter((group) => group.items.length > 0);
 }
 
-// Used by the sidebar's active-state logic. The pathname matches an item
-// when it equals the href exactly OR when it's a child path (so
-// `/admin/plugins/some-key` highlights `/admin/plugins`). The root
-// `/admin` item only matches the exact pathname so we don't permanently
-// highlight Dashboard on every page.
 export function isActiveNavItem(
   itemHref: string,
   pathname: string | null | undefined,

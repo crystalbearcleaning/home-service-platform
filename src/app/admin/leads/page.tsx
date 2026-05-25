@@ -64,9 +64,9 @@ export default async function LeadsPage() {
       stagingToolsEnabled={shell.stagingToolsEnabled}
     >
       <PageHeader
-        eyebrow="Business Records"
+        eyebrow="CRM"
         title="Leads"
-        description={`Business request records created when a /q visitor submits the contact form. Read-only. Most recent ${PAGE_SIZE}.`}
+        description={`Request / opportunity records. The primary CRM view is Contacts — leads are accessible here and from each contact's customer hub. Most recent ${PAGE_SIZE}.`}
       />
 
       {error ? (
@@ -84,13 +84,8 @@ export default async function LeadsPage() {
         <SectionCard padding="none">
           <ul className="divide-y divide-line">
             {rows.map((row) => (
-              <li key={row.id}>
-                <Link
-                  href={`/admin/leads/${row.id}`}
-                  className="block p-4 transition hover:bg-surface-muted"
-                >
-                  <LeadRow row={row} />
-                </Link>
+              <li key={row.id} className="p-4">
+                <LeadRow row={row} />
               </li>
             ))}
           </ul>
@@ -117,7 +112,12 @@ function LeadRow({ row }: { row: Row }) {
     <div className="flex items-start justify-between gap-3 text-sm">
       <div className="min-w-0 flex-1">
         <div className="font-medium text-ink">
-          {row.contacts?.full_name ?? "—"}
+          <Link
+            href={`/admin/contacts/${row.contact_id}`}
+            className="underline-offset-2 hover:underline"
+          >
+            {row.contacts?.full_name ?? "—"}
+          </Link>
         </div>
         <div className="mt-0.5 text-xs text-ink-muted">
           {row.contacts?.email ?? "—"} · {row.contacts?.phone ?? "—"}
@@ -137,6 +137,12 @@ function LeadRow({ row }: { row: Row }) {
         <StatusBadge tone={statusTone(row.status)}>
           {row.status.replace(/_/g, " ")}
         </StatusBadge>
+        <Link
+          href={`/admin/leads/${row.id}`}
+          className="text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+        >
+          Open lead →
+        </Link>
         <span className="text-ink-faint">
           {new Date(row.created_at).toLocaleString()}
         </span>

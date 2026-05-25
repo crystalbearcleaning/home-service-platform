@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
@@ -55,6 +56,29 @@ export default async function TasksPage() {
 
   const rows = (data ?? []) as Row[];
 
+  // Batched lead→contact lookup so each lead-related task row can link
+  // to its customer. Tasks tie to leads via the soft reference
+  // (related_object_type='lead' AND related_object_id=lead.id), which
+  // isn't a true FK PostgREST can join on — so we do one extra query.
+  const leadIds = Array.from(
+    new Set(
+      rows
+        .filter((r) => r.related_object_type === "lead" && r.related_object_id)
+        .map((r) => r.related_object_id as string),
+    ),
+  );
+  const contactByLead = new Map<string, string>();
+  if (leadIds.length > 0) {
+    const { data: leadRows } = await supabase
+      .from("leads")
+      .select("id,contact_id")
+      .eq("business_id", business.id)
+      .in("id", leadIds);
+    for (const l of leadRows ?? []) {
+      contactByLead.set(l.id, l.contact_id);
+    }
+  }
+
   return (
     <AdminShell
       workspaceName={shell.workspaceName}
@@ -63,9 +87,9 @@ export default async function TasksPage() {
       stagingToolsEnabled={shell.stagingToolsEnabled}
     >
       <PageHeader
-        eyebrow="Business Records"
+        eyebrow="Tasks"
         title="Tasks"
-        description={`Admin follow-up and system tasks. Each /q submission creates one (schedule, manual quote, or area review). Read-only. Most recent ${PAGE_SIZE}.`}
+        description={`Admin follow-up and system tasks. Each /q submission creates one (schedule, manual quote, or area review). Most recent ${PAGE_SIZE}.`}
       />
 
       {error ? (
@@ -82,11 +106,17 @@ export default async function TasksPage() {
       ) : (
         <SectionCard padding="none">
           <ul className="divide-y divide-line">
-            {rows.map((row) => (
-              <li key={row.id} className="p-4">
-                <TaskRow row={row} />
-              </li>
-            ))}
+            {rows.map((row) => {
+              const contactId =
+                row.related_object_type === "lead" && row.related_object_id
+                  ? (contactByLead.get(row.related_object_id) ?? null)
+                  : null;
+              return (
+                <li key={row.id} className="p-4">
+                  <TaskRow row={row} contactId={contactId} />
+                </li>
+              );
+            })}
           </ul>
         </SectionCard>
       )}
@@ -106,7 +136,13 @@ function categoryTone(category: string): StatusTone {
   }
 }
 
-function TaskRow({ row }: { row: Row }) {
+function TaskRow({
+  row,
+  contactId,
+}: {
+  row: Row;
+  contactId: string | null;
+}) {
   return (
     <div className="text-sm">
       <div className="flex items-start justify-between gap-3">
@@ -117,12 +153,27 @@ function TaskRow({ row }: { row: Row }) {
               {row.description}
             </pre>
           )}
-          <div className="mt-2 font-mono text-[11px] text-ink-faint">
-            task {row.id.slice(0, 8)}…
-            {row.related_object_type && row.related_object_id
-              ? ` · ${row.related_object_type} ${row.related_object_id.slice(0, 8)}…`
-              : ""}
-            {row.source_plugin_key ? ` · ${row.source_plugin_key}` : ""}
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px]">
+            {contactId && (
+              <Link
+                href={`/admin/contacts/${contactId}`}
+                className="text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+              >
+                Customer →
+              </Link>
+            )}
+            {row.related_object_type === "lead" && row.related_object_id && (
+              <Link
+                href={`/admin/leads/${row.related_object_id}`}
+                className="text-ink-muted underline-offset-2 hover:text-ink hover:underline"
+              >
+                Lead →
+              </Link>
+            )}
+            <span className="font-mono text-ink-faint">
+              task {row.id.slice(0, 8)}…
+              {row.source_plugin_key ? ` · ${row.source_plugin_key}` : ""}
+            </span>
           </div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1 whitespace-nowrap text-xs">

@@ -6,34 +6,66 @@ describe("resolveAdminNav", () => {
     const withGate = resolveAdminNav({ stagingToolsEnabled: true });
     const withoutGate = resolveAdminNav({ stagingToolsEnabled: false });
 
-    const withHrefs = withGate
-      .flatMap((g) => g.items.map((i) => i.href));
-    const withoutHrefs = withoutGate
-      .flatMap((g) => g.items.map((i) => i.href));
+    const withHrefs = withGate.flatMap((g) => g.items.map((i) => i.href));
+    const withoutHrefs = withoutGate.flatMap((g) =>
+      g.items.map((i) => i.href),
+    );
 
     expect(withHrefs).toContain("/admin/staging-tools");
     expect(withoutHrefs).not.toContain("/admin/staging-tools");
   });
 
-  it("always exposes the core groups in the expected order", () => {
+  it("exposes the Phase 4 group order", () => {
     const groups = resolveAdminNav({ stagingToolsEnabled: false });
     expect(groups.map((g) => g.label)).toEqual([
       "Overview",
-      "Plugins",
-      "Business Records",
+      "CRM",
+      "Tasks",
       "Automations",
+      "Plugins",
       "Observability",
       "Tools",
     ]);
   });
 
-  it("includes Message Automations under the Automations group", () => {
+  it("CRM group contains exactly Contacts + Quotes (in that order)", () => {
     const groups = resolveAdminNav({ stagingToolsEnabled: false });
-    const automations = groups.find((g) => g.label === "Automations");
-    expect(automations).toBeDefined();
-    expect(automations?.items.map((i) => i.href)).toEqual([
-      "/admin/message-automations",
+    const crm = groups.find((g) => g.label === "CRM");
+    expect(crm).toBeDefined();
+    expect(crm?.items.map((i) => i.href)).toEqual([
+      "/admin/contacts",
+      "/admin/quotes",
     ]);
+  });
+
+  it("Tasks has its own group with one entry", () => {
+    const groups = resolveAdminNav({ stagingToolsEnabled: false });
+    const tasks = groups.find((g) => g.label === "Tasks");
+    expect(tasks?.items.map((i) => i.href)).toEqual(["/admin/tasks"]);
+  });
+
+  it("Observability includes Quote interactions, Activity, Events in that order", () => {
+    const groups = resolveAdminNav({ stagingToolsEnabled: false });
+    const obs = groups.find((g) => g.label === "Observability");
+    expect(obs?.items.map((i) => i.href)).toEqual([
+      "/admin/quote-interactions",
+      "/admin/activity",
+      "/admin/events",
+    ]);
+  });
+
+  it("does not include Leads as a top-level sidebar entry", () => {
+    const groups = resolveAdminNav({ stagingToolsEnabled: true });
+    const hrefs = groups.flatMap((g) => g.items.map((i) => i.href));
+    expect(hrefs).not.toContain("/admin/leads");
+  });
+
+  it("does not include Jobs / Invoices / top-level Properties placeholders", () => {
+    const groups = resolveAdminNav({ stagingToolsEnabled: true });
+    const hrefs = groups.flatMap((g) => g.items.map((i) => i.href));
+    expect(hrefs).not.toContain("/admin/jobs");
+    expect(hrefs).not.toContain("/admin/invoices");
+    expect(hrefs).not.toContain("/admin/properties");
   });
 
   it("never surfaces individual test routes as sidebar links", () => {
@@ -52,9 +84,6 @@ describe("resolveAdminNav", () => {
   });
 
   it("drops empty groups (defensive)", () => {
-    // Tools group has Testing + Staging; with the gate off, Testing
-    // alone keeps the group visible. Even if a future edit removes the
-    // testing hub, the filter should never emit an empty group.
     const groups = resolveAdminNav({ stagingToolsEnabled: false });
     for (const g of groups) {
       expect(g.items.length).toBeGreaterThan(0);
@@ -65,22 +94,25 @@ describe("resolveAdminNav", () => {
 describe("isActiveNavItem", () => {
   it("matches the dashboard only on the exact root path", () => {
     expect(isActiveNavItem("/admin", "/admin")).toBe(true);
-    expect(isActiveNavItem("/admin", "/admin/leads")).toBe(false);
-    expect(isActiveNavItem("/admin", "/admin/plugins/foo")).toBe(false);
+    expect(isActiveNavItem("/admin", "/admin/contacts")).toBe(false);
   });
 
   it("matches exact and nested paths for non-root items", () => {
-    expect(isActiveNavItem("/admin/plugins", "/admin/plugins")).toBe(true);
-    expect(isActiveNavItem("/admin/plugins", "/admin/plugins/customer_quote_sales_page")).toBe(true);
+    expect(isActiveNavItem("/admin/contacts", "/admin/contacts")).toBe(true);
+    expect(
+      isActiveNavItem("/admin/contacts", "/admin/contacts/abc-123"),
+    ).toBe(true);
   });
 
   it("does not match unrelated paths", () => {
-    expect(isActiveNavItem("/admin/leads", "/admin/quotes")).toBe(false);
-    expect(isActiveNavItem("/admin/leads", "/admin/leadspersonas")).toBe(false);
+    expect(isActiveNavItem("/admin/contacts", "/admin/quotes")).toBe(false);
+    expect(isActiveNavItem("/admin/contacts", "/admin/contactspersonas")).toBe(
+      false,
+    );
   });
 
   it("returns false when pathname is null / undefined", () => {
-    expect(isActiveNavItem("/admin/leads", null)).toBe(false);
-    expect(isActiveNavItem("/admin/leads", undefined)).toBe(false);
+    expect(isActiveNavItem("/admin/contacts", null)).toBe(false);
+    expect(isActiveNavItem("/admin/contacts", undefined)).toBe(false);
   });
 });

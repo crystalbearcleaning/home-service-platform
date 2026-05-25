@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
@@ -66,7 +67,7 @@ export default async function QuotesPage() {
       stagingToolsEnabled={shell.stagingToolsEnabled}
     >
       <PageHeader
-        eyebrow="Business Records"
+        eyebrow="CRM"
         title="Quotes"
         description={`Immutable price snapshots. Each row preserves options, line items, and calculation as they existed at submission. Most recent ${PAGE_SIZE}.`}
       />
@@ -106,7 +107,12 @@ function QuoteRow({ row, expired }: { row: Row; expired: boolean }) {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="font-medium text-ink">
-            {row.contacts?.full_name ?? "—"}
+            <Link
+              href={`/admin/contacts/${row.contact_id}`}
+              className="underline-offset-2 hover:underline"
+            >
+              {row.contacts?.full_name ?? "—"}
+            </Link>
           </div>
           <div className="mt-0.5 text-xs text-ink-muted">
             {row.contacts?.email ?? "—"}
