@@ -99,6 +99,36 @@ marketplace, no data import / export, no AI / context-engine
 expansion, and no edit / delete / archive flows on save files. See
 §10 of the Phase 6 doc before extending scope.
 
+Phase 6 is **complete** — see `docs/PHASE_6_QA_REPORT.md` for the
+sign-off.
+
+Phase 7 is the **Simulation Play Surface + Door Hanger Simulation
+Adapter** phase. It builds the first playable simulation loop on top
+of the Phase 6 workspace + save-file foundation: a new
+`/admin/simulation/play` page gated by simulation workspace + active
+save, the Door Hanger Plugin's first simulation adapter (Start
+simulated route / Hang 1 / Hang custom / Hang route / Finish),
+session-level `seconds_per_hanger` (default 30), route-stop based
+execution when stops exist (count-only fallback otherwise),
+per-action inventory decrement, per-action simulated-time advance,
+route + session completion timestamps, and a new
+`simulation_activity` feed scoped to the active save. Phase 7A is
+**docs only**. The source-of-truth design doc is:
+
+- `docs/PHASE_7_SIMULATION_PLAY_AND_DOOR_HANGER_ADAPTER.md`
+
+Phase 7 stays narrow: no CRM outcome generation (quote requests,
+contacts, leads, quotes, tasks, jobs, notes, issues, notifications),
+no delayed customer responses, no message automation outcomes, no
+customer messaging, no real worker mobile app, no GPS / maps / pin /
+drawing UI, no route cooldown filtering, no jobs / invoices /
+scheduling, no full game economy, no plugin builder / marketplace,
+no data import / export, no AI / context-engine expansion, no edit /
+delete / archive flows on simulation_runs / sessions / routes /
+designs / campaigns / simulation_activity, no multi-active sessions,
+and no change to the public `/q` flow. See §§12 + 14 of the Phase 7
+doc before extending scope.
+
 ---
 
 ## Tech Stack
