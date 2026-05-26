@@ -1,4 +1,5 @@
 import { createClient } from "@/core/auth/server";
+import { readSelectedBusinessCookie } from "./workspace-selection";
 
 export type ActiveBusinessSummary = {
   id: string;
@@ -12,6 +13,12 @@ export type ActiveBusinessSummary = {
   installedPluginsCount: number;
 };
 
+// Phase 6D: the active workspace is whichever business the user
+// 1. has an active membership in AND
+// 2. has selected via the workspace switcher (cookie), if any.
+// If the cookie is unset or points to a workspace the user no longer has
+// active membership in, fall back to the first-active-membership default
+// (Phase 1 behavior).
 export async function getActiveBusinessForUser(
   userId: string,
 ): Promise<ActiveBusinessSummary | null> {
@@ -19,19 +26,24 @@ export async function getActiveBusinessForUser(
 
   const { data: memberships } = await supabase
     .from("business_memberships")
-    .select("id, business_id")
+    .select("id, business_id, joined_at")
     .eq("user_id", userId)
     .eq("status", "active")
-    .order("joined_at", { ascending: true, nullsFirst: false })
-    .limit(1);
+    .order("joined_at", { ascending: true, nullsFirst: false });
 
-  const membership = memberships?.[0];
-  if (!membership) return null;
+  if (!memberships || memberships.length === 0) return null;
+
+  const selectedId = await readSelectedBusinessCookie();
+  const preferred =
+    (selectedId &&
+      memberships.find((m) => m.business_id === selectedId)) ||
+    memberships[0];
+  if (!preferred) return null;
 
   const { data: business } = await supabase
     .from("businesses")
     .select("id, slug, name, is_simulation")
-    .eq("id", membership.business_id)
+    .eq("id", preferred.business_id)
     .single();
 
   if (!business) return null;
@@ -39,7 +51,7 @@ export async function getActiveBusinessForUser(
   const { data: roleRows } = await supabase
     .from("membership_roles")
     .select("role_id")
-    .eq("membership_id", membership.id)
+    .eq("membership_id", preferred.id)
     .limit(1);
 
   let roleName: string | null = null;
@@ -74,7 +86,7 @@ export async function getActiveBusinessForUser(
     slug: business.slug,
     name: business.name,
     isSimulation: Boolean(business.is_simulation),
-    membershipId: membership.id,
+    membershipId: preferred.id,
     roleName,
     roleKey,
     appSurfacesCount: appSurfacesCount ?? 0,

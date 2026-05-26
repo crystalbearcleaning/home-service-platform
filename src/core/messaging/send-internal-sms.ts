@@ -1,5 +1,9 @@
 import "server-only";
 
+import {
+  lookupBusinessIsSimulation,
+  shouldSkipForSimulation,
+} from "@/core/business/is-simulation-business";
 import { readGhlConfigStatus } from "./config";
 import {
   createPendingNotificationLog,
@@ -73,6 +77,42 @@ export async function sendInternalSmsNotification(
       code: "INVALID_INPUT",
       message: "renderedMessage must be non-empty.",
     });
+  }
+
+  // 2a. Phase 6D side-effect guardrail. If the active business is a
+  //     simulation workspace, never touch GoHighLevel. Write a single
+  //     skipped log so the admin still sees what would have happened.
+  //     A failed lookup falls through to the normal send path —
+  //     fail-safe to the existing behavior.
+  const simLookup = await lookupBusinessIsSimulation(input.businessId);
+  if (shouldSkipForSimulation(simLookup)) {
+    const simSkipped = await createSkippedNotificationLog({
+      businessId: input.businessId,
+      automationId: input.automationId,
+      recipientId: input.recipientId,
+      providerKey: input.providerKey,
+      channel: "sms",
+      recipientPhoneE164: input.recipientPhoneE164,
+      renderedMessage: input.renderedMessage,
+      reasonCode: "SIMULATION_NO_OP",
+      reasonMessage:
+        "Active business is a simulation workspace — real SMS sends are disabled.",
+      relatedTaskId: input.relatedTaskId ?? null,
+      relatedLeadId: input.relatedLeadId ?? null,
+      relatedQuoteId: input.relatedQuoteId ?? null,
+      relatedContactId: input.relatedContactId ?? null,
+      relatedPropertyId: input.relatedPropertyId ?? null,
+    });
+    return {
+      ok: false,
+      logId: simSkipped.ok ? simSkipped.data.logId : null,
+      status: "skipped",
+      error: {
+        code: "SIMULATION_NO_OP",
+        message:
+          "Active business is a simulation workspace — real SMS sends are disabled.",
+      },
+    };
   }
 
   // 2. Check provider config BEFORE inserting a pending row. When config

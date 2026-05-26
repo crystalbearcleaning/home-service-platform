@@ -10,6 +10,8 @@ import {
   StatusBadge,
   resolveAdminShellContext,
   type StatusTone,
+  renderWorkspaceSwitcher,
+  renderSimulationBanner,
 } from "@/components/admin";
 import { SignOutButton } from "../../sign-out-button";
 import { LeadDetailClient } from "./lead-detail-client";
@@ -97,8 +99,9 @@ export default async function LeadDetailPage({ params }: Props) {
   const business = await getActiveBusinessForUser(user.id);
   if (!business) redirect("/admin");
 
-  const shell = resolveAdminShellContext({
-    workspaceName: business.name,
+  const shell = await resolveAdminShellContext({
+    business,
+    userId: user.id,
     userEmail: user.email ?? "—",
   });
 
@@ -181,6 +184,8 @@ export default async function LeadDetailPage({ params }: Props) {
       userEmail={shell.userEmail}
       signOutSlot={<SignOutButton />}
       stagingToolsEnabled={shell.stagingToolsEnabled}
+      workspaceSwitcherSlot={renderWorkspaceSwitcher(shell)}
+      simulationBannerSlot={renderSimulationBanner(shell)}
     >
       <div className="mb-2 text-[11px]">
         <Link

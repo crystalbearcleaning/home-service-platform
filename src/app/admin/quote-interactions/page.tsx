@@ -11,6 +11,8 @@ import {
   StatusBadge,
   resolveAdminShellContext,
   type StatusTone,
+  renderWorkspaceSwitcher,
+  renderSimulationBanner,
 } from "@/components/admin";
 import { SignOutButton } from "../sign-out-button";
 
@@ -55,8 +57,9 @@ export default async function QuoteInteractionsPage() {
   const business = await getActiveBusinessForUser(user.id);
   if (!business) redirect("/admin");
 
-  const shell = resolveAdminShellContext({
-    workspaceName: business.name,
+  const shell = await resolveAdminShellContext({
+    business,
+    userId: user.id,
     userEmail: user.email ?? "—",
   });
 
@@ -77,6 +80,8 @@ export default async function QuoteInteractionsPage() {
       userEmail={shell.userEmail}
       signOutSlot={<SignOutButton />}
       stagingToolsEnabled={shell.stagingToolsEnabled}
+      workspaceSwitcherSlot={renderWorkspaceSwitcher(shell)}
+      simulationBannerSlot={renderSimulationBanner(shell)}
     >
       <PageHeader
         eyebrow="Observability"

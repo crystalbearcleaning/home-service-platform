@@ -586,3 +586,122 @@ The migration is **created but not applied**. Operator runs
 `supabase db push` when ready. The migration uses `create table`
 (forward-only, matches the Phase 1 / 5 pattern) and `drop policy if
 exists` so re-applying is safe in dev.
+
+---
+
+## Appendix C — Phase 6D switcher + banner + first guardrail (delivered)
+
+**Status:** workspace switcher, Simulation Mode banner, and the first
+side-effect guardrail (GHL SMS) shipped. **No schema changes.** **No
+gameplay.**
+**Added:** 2026-05-26.
+
+Phase 6D closes the loop on §6–§7: real → simulation switching is
+visible and one click, the operator can tell the simulation workspace
+apart from the real workspace at a glance, and the GoHighLevel SMS
+adapter short-circuits to a logged no-op when the active business is
+a simulation workspace.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/core/business/workspace-selection.ts` | Server-only HTTP-only cookie helpers (`SELECTED_BUSINESS_COOKIE`, `readSelectedBusinessCookie`, `writeSelectedBusinessCookie`, `clearSelectedBusinessCookie`) plus a pure `isValidBusinessIdCandidate` UUID-shape check. |
+| `src/core/business/workspace-selection.test.ts` | 5 unit tests pinning the UUID shape check. |
+| `src/core/business/list-memberships.ts` | Server-only `listMembershipBusinessesForUser(userId)` — reads under the user's session so RLS does the authorization. Real workspaces sort first, then simulation. |
+| `src/core/business/active-business.ts` | Updated `getActiveBusinessForUser`: honors the `SELECTED_BUSINESS_COOKIE`, falls back to first-active-membership when the cookie is unset or points to a workspace the user no longer belongs to. |
+| `src/core/business/is-simulation-business.ts` | Server-only `lookupBusinessIsSimulation(businessId)` (service-role read of `businesses.is_simulation`) + pure `shouldSkipForSimulation(lookup)` for testing the guardrail decision in isolation. Fail-safe: only a confirmed `true` triggers the skip. |
+| `src/core/business/is-simulation-business.test.ts` | 4 unit tests pinning the decision helper. |
+| `src/app/admin/workspace-actions.ts` | `setActiveWorkspaceAction({ businessId })` + `clearActiveWorkspaceAction()` server actions. Verifies the user has active membership in the target workspace before writing the cookie. Revalidates the `/admin` route group. |
+| `src/components/admin/workspace-switcher.tsx` | Client component rendered in the topbar. Lists workspaces with a "Sim" pill on simulation workspaces; switching calls the action and reloads. |
+| `src/components/admin/simulation-mode-banner.tsx` | Server-rendered banner shown whenever the active workspace is a simulation workspace. Shows workspace name, active save name, simulated current time, and current cash. Falls back to a "Create or pick one →" link when no save is active. |
+| `src/components/admin/admin-shell-slots.tsx` | Tiny server-side render helpers (`renderWorkspaceSwitcher(shell)`, `renderSimulationBanner(shell)`) so each page can drop the slots into `<AdminShell>` without rebuilding the wiring. |
+| `src/components/admin/admin-shell.tsx` + `admin-topbar.tsx` | New optional `workspaceSwitcherSlot` and `simulationBannerSlot` props on `AdminShell`. Topbar renders the switcher slot ahead of the staging-tools pill; banner slot sits between the topbar and the page content. |
+| `src/components/admin/admin-shell-props.ts` | `resolveAdminShellContext` is now **async** and accepts `{ business, userId, userEmail }`. Returns the existing fields plus `workspaces`, `activeBusinessId`, and `simulationBanner` (the `getActiveSimulationRun` data when the active workspace is a simulation workspace). |
+| `src/components/admin/index.ts` | Re-exports the new symbols. |
+| `src/core/messaging/send-internal-sms.ts` | New side-effect guardrail: `sendInternalSmsNotification` now looks up `is_simulation` immediately after the basic-input checks and short-circuits with a skipped log (`reasonCode='SIMULATION_NO_OP'`) when the workspace is a simulation. The existing `MISSING_CONFIG` skipped log path still fires for real workspaces with missing GHL config. Failed lookups fall through to the existing send path (fail-safe). |
+| 25 admin pages | `resolveAdminShellContext` call now passes `business` + `userId` and is `await`ed; the `<AdminShell>` render adds `workspaceSwitcherSlot={renderWorkspaceSwitcher(shell)}` + `simulationBannerSlot={renderSimulationBanner(shell)}`. Pages otherwise unchanged. |
+
+### Switcher behavior
+
+- Stored as an HTTP-only cookie scoped to `/admin`
+  (`admin_active_business_id`).
+- The active-business resolver reads the cookie; if it points to a
+  workspace the user still has active membership in, that wins.
+  Otherwise the first-active-membership default takes over.
+- `setActiveWorkspaceAction` verifies membership server-side before
+  writing the cookie, then `revalidatePath('/admin', 'layout')`. The
+  client component also issues a `window.location.reload()` so server
+  components re-render under the new active business immediately.
+- Real workspaces sort first; simulation workspaces carry an inline
+  "Sim" pill so the operator can't pick the wrong one by mistake.
+- Single-membership users see a static label (no dropdown affordance).
+- No workspace creation, no membership management — strictly switching.
+
+### Simulation Mode banner behavior
+
+- Rendered **only** when the active workspace is a simulation
+  workspace.
+- Persistent across every admin page (slot lives in `AdminShell`).
+- Includes:
+  - "Simulation Mode" label + workspace name.
+  - "Real external effects are disabled." reminder.
+  - Active save name, simulated current time, current cash — or a
+    "No active save selected. Create or pick one →" link.
+- Real workspaces show no banner.
+
+### Active save display
+
+- Sourced from `getActiveSimulationRun(businessId)` (Phase 6C).
+- Banner shows: name, `simulated_current_at` (local-formatted),
+  `current_cash_cents` ($ formatted).
+- Updates automatically after `/admin/simulation` flips active state
+  (server-component data fetch).
+- No editing / deleting / archiving from the banner — strictly read.
+
+### GHL side-effect guardrail behavior
+
+- Lives at the top of `sendInternalSmsNotification`
+  (`src/core/messaging/send-internal-sms.ts`), after the basic-input
+  pre-flight, before the `MISSING_CONFIG` config check.
+- Calls `lookupBusinessIsSimulation(businessId)` (server-only,
+  service-role).
+- If the lookup returns `{ ok: true, isSimulation: true }`:
+  - Writes a single skipped `notification_logs` row with
+    `error_code='SIMULATION_NO_OP'` and a short reason message.
+  - Returns `{ ok: false, status: 'skipped', error: { code: 'SIMULATION_NO_OP' } }`.
+  - **No GoHighLevel API call is made.**
+  - **No pending log row is created.**
+- If the lookup fails (DB error, client init failure, etc.), the
+  guardrail **falls through** to the existing send path. Real
+  workspaces remain unaffected by lookup outages.
+- Real-workspace behavior is unchanged — the existing
+  `MISSING_CONFIG` / `pending` / `sent` / `failed` paths still run.
+
+### Tests
+
+- `is-simulation-business.test.ts` — pure decision helper (4 cases:
+  confirmed simulation → skip; confirmed real → no skip; lookup error
+  → no skip; unknown-shape lookup error → no skip).
+- `workspace-selection.test.ts` — `isValidBusinessIdCandidate` UUID
+  shape check (5 cases: lowercase, uppercase, non-string, garbage,
+  empty/whitespace).
+- Existing `nav-config.test.ts`, simulation validation tests, and the
+  message-engine pre-flight tests continue to pin.
+- DB-backed paths (`sendInternalSmsNotification` integration,
+  cookie-driven active-business resolution) are exercised manually
+  against the linked Supabase project; pure helpers cover the decision
+  logic.
+
+### What Phase 6D deliberately does NOT do
+
+- No Door Hanger Hang 1 / Hang Route gameplay.
+- No CRM lead / quote / task generation from simulation.
+- No simulated quote requests.
+- No delayed customer responses.
+- No email / payment / other-adapter guardrails (GHL SMS is the
+  first; the pattern is the same — adapter looks up `is_simulation`
+  and short-circuits).
+- No workspace creation / membership management UI.
+- No edit / delete / archive flows on save files.
+- No schema changes — Phase 6D is code-only.

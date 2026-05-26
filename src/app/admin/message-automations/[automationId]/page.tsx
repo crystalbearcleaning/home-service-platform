@@ -9,6 +9,8 @@ import {
   SectionCard,
   StatusBadge,
   resolveAdminShellContext,
+  renderWorkspaceSwitcher,
+  renderSimulationBanner,
 } from "@/components/admin";
 import {
   type NotificationLogSummary,
@@ -37,8 +39,9 @@ export default async function AutomationDetailPage({ params }: Props) {
   const business = await getActiveBusinessForUser(user.id);
   if (!business) redirect("/admin");
 
-  const shell = resolveAdminShellContext({
-    workspaceName: business.name,
+  const shell = await resolveAdminShellContext({
+    business,
+    userId: user.id,
     userEmail: user.email ?? "—",
   });
 
@@ -92,6 +95,8 @@ export default async function AutomationDetailPage({ params }: Props) {
       userEmail={shell.userEmail}
       signOutSlot={<SignOutButton />}
       stagingToolsEnabled={shell.stagingToolsEnabled}
+      workspaceSwitcherSlot={renderWorkspaceSwitcher(shell)}
+      simulationBannerSlot={renderSimulationBanner(shell)}
     >
       <div className="mb-2 text-[11px]">
         <Link

@@ -7,6 +7,8 @@ import {
   PageHeader,
   SectionCard,
   resolveAdminShellContext,
+  renderWorkspaceSwitcher,
+  renderSimulationBanner,
 } from "@/components/admin";
 import { listAdminContacts } from "@/core/contacts/admin-data";
 import { filterContacts } from "@/core/contacts/admin-search";
@@ -29,8 +31,9 @@ export default async function ContactsPage({ searchParams }: PageProps) {
   const business = await getActiveBusinessForUser(user.id);
   if (!business) redirect("/admin");
 
-  const shell = resolveAdminShellContext({
-    workspaceName: business.name,
+  const shell = await resolveAdminShellContext({
+    business,
+    userId: user.id,
     userEmail: user.email ?? "—",
   });
 
@@ -46,6 +49,8 @@ export default async function ContactsPage({ searchParams }: PageProps) {
       userEmail={shell.userEmail}
       signOutSlot={<SignOutButton />}
       stagingToolsEnabled={shell.stagingToolsEnabled}
+      workspaceSwitcherSlot={renderWorkspaceSwitcher(shell)}
+      simulationBannerSlot={renderSimulationBanner(shell)}
     >
       <PageHeader
         eyebrow="CRM"

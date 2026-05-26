@@ -12,6 +12,7 @@ type Props = {
   userEmail: string;
   signOutSlot?: React.ReactNode;
   stagingToolsEnabled?: boolean;
+  workspaceSwitcherSlot?: React.ReactNode;
   onOpenMobileNav: () => void;
 };
 
@@ -20,6 +21,7 @@ export function AdminTopbar({
   userEmail,
   signOutSlot,
   stagingToolsEnabled,
+  workspaceSwitcherSlot,
   onOpenMobileNav,
 }: Props) {
   return (
@@ -47,6 +49,7 @@ export function AdminTopbar({
       </div>
 
       <div className="ml-auto flex items-center gap-3">
+        {workspaceSwitcherSlot}
         {stagingToolsEnabled && (
           <span
             className="hidden sm:inline-flex items-center gap-1.5 rounded-pill bg-warning-soft px-2 py-0.5 text-[11px] font-medium uppercase tracking-wide text-warning-strong"

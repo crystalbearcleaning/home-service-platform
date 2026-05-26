@@ -10,6 +10,18 @@ export {
   resolveAdminShellContext,
   type AdminShellContext,
 } from "./admin-shell-props";
+export {
+  WorkspaceSwitcher,
+  type WorkspaceSwitcherOption,
+} from "./workspace-switcher";
+export {
+  SimulationModeBanner,
+  type SimulationBannerContext,
+} from "./simulation-mode-banner";
+export {
+  renderWorkspaceSwitcher,
+  renderSimulationBanner,
+} from "./admin-shell-slots";
 export { AdminSidebar } from "./admin-sidebar";
 export { AdminTopbar } from "./admin-topbar";
 export { AdminMobileNav } from "./admin-mobile-nav";
