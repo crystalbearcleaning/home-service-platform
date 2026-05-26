@@ -946,3 +946,109 @@ The gate runs after auth + active-business resolution:
 - No maps / GPS / pin / drawing UI.
 - No route cooldown filtering.
 - No new schema, no migration.
+
+---
+
+## Appendix C — Phase 7D-1 Start simulated route (delivered)
+
+**Status:** the first gameplay mutation. Operators can start a
+simulated Door Hanger session from `/admin/simulation/play`.
+**No Hang actions yet, no inventory decrement, no simulated time
+advance, no CRM outcomes.** **No schema changes.**
+**Added:** 2026-05-27.
+
+Phase 7D-1 wires §5.1 of the Phase 7 doc end-to-end. Hang 1 / Hang
+custom / Hang route / Finish remain disabled and land in Phase 7D-2+.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/plugins/door-hanger/simulation/start-validation.ts` | Pure `validateStartSessionForm` — routeId / designId / seconds_per_hanger (defaults to 30 when empty; field-level errors otherwise). |
+| `src/plugins/door-hanger/simulation/start-validation.test.ts` | 12 pure unit tests covering accept, trim, default, missing ids, non-numeric / non-integer / out-of-range seconds, multi-error collection. |
+| `src/plugins/door-hanger/simulation/index.ts` | Re-exports the validator + types. |
+| `src/core/door-hanger/simulation-start.ts` | Server-only `startDoorHangerSimulationSession`. Verifies plugin install/enabled, route ownership + startable status (`draft`/`ready`/`paused`), design ownership + remaining inventory > 0, no-active-session-per-save, then inserts the session, flips the route to `in_progress`, and appends the `door_hanger.session_started` activity row. |
+| `src/core/simulation/play-page-data.ts` | Added `listSelectableRoutesForStart` (status in draft/ready/paused, manual + rentcast) and `listSelectableDesignsForStart` (app-side filter on `quantity_received - quantity_used > 0` because PostgREST does not support column-vs-column filters). |
+| `src/app/admin/simulation/play/actions.ts` | `startDoorHangerSimulationSessionAction` — auth, active simulation business, active save, then delegates to the core helper. Revalidates `/admin/simulation/play` and `/admin/marketing/door-hangers`. |
+| `src/app/admin/simulation/play/start-form.tsx` | Client form: route + design selects + seconds-per-hanger number input. Empty-prereq friendly states ("Create a Door Hanger route…", "Create an inventory design…"). Client-side validation mirrors the pure helper for fast feedback. |
+| `src/app/admin/simulation/play/page.tsx` | Fetches start-form prerequisites only when the plugin is enabled AND no active session exists. Door Hanger card now branches: active session → Hang buttons (disabled) + status pill; no session → embedded `StartSimulatedRouteForm`. |
+
+### Start session behavior
+
+When the operator submits the form:
+
+1. Auth + active business + active simulation save are re-resolved
+   server-side. The simulated-clock value (`simulation_runs.simulated_current_at`)
+   is captured at action-entry time and reused as the session's
+   `distributed_at` / `started_at` and the activity's `simulated_at`.
+2. Pure form validation runs first. Field errors return without any
+   DB round-trip.
+3. Plugin install + enabled check (`plugin_definitions` →
+   `installed_plugins.status = 'enabled'` for the active business).
+4. Route ownership check (`business_id = activeBusiness.id`) +
+   startable-status check (`status in (draft, ready, paused)`).
+5. Design ownership check + remaining inventory > 0
+   (`quantity_received - quantity_used > 0`).
+6. One-active-session-per-save check (`mode='simulated'` +
+   `status='active'` + `simulation_run_id = activeRun.id`). Rejects
+   with `SESSION_ALREADY_ACTIVE` if another is already running.
+7. Insert `door_hanger_distribution_sessions` row:
+   `mode='simulated'`, `status='active'`, `hangers_distributed=0`,
+   `time_spent_seconds=0`, `material_cost_cents=null`,
+   `seconds_per_hanger=<form value>`, `simulation_run_id=<active>`,
+   `campaign_id=<route.campaign_id>`, `route_id=<form>`,
+   `design_id=<form>`, `distributed_at=started_at=<simulatedNow>`.
+8. Update `door_hanger_routes.status = 'in_progress'`.
+9. Append `simulation_activity` row: `action_type='door_hanger.session_started'`,
+   `summary='Started route {name}'`, metadata carrying session/route/
+   design ids + seconds_per_hanger.
+
+**No inventory decrement, no simulated-time advance, no route-stop
+flips, no CRM rows, no message-engine calls.** Phase 7D-1 ends here.
+
+### UI behavior
+
+- **No active session** — Door Hanger card embeds the start form
+  (route select, design select, seconds-per-hanger input, "Start
+  simulated route" submit). Disabled prereq states render when no
+  routes or no designs exist, with links to
+  `/admin/marketing/door-hangers`.
+- **Active session** — start form disappears; the card shows a
+  "route in progress" pill plus the three disabled Hang buttons
+  (Hang 1 / Hang custom / Hang route) with "Coming next" copy.
+  The existing "Current Door Hanger work in progress" section
+  renders the session data (Phase 7C).
+
+### Activity behavior
+
+- Exactly one `simulation_activity` row per successful start —
+  `plugin_key='door_hanger'`, `action_type='door_hanger.session_started'`,
+  human-readable `summary`, `simulated_at` = the save's clock at
+  start.
+- No `events` / `activities` / `notification_logs` / `tasks` /
+  `contacts` / `leads` / `quotes` rows are written.
+
+### Transactional posture
+
+The three writes (session insert → route status update → activity
+insert) are **ordered** rather than wrapped in a real DB transaction
+— Supabase JS has no native transaction primitive and the existing
+Phase 5B `createDistributionSession` uses the same posture. The
+helper surfaces specific error codes when later steps fail (the
+session row is real, only the secondary writes were partial). A
+future RPC-based transaction may land alongside Phase 7D-2 because
+Hang actions (inventory + clock + stop completion) need atomicity
+that this helper does not.
+
+### What Phase 7D-1 deliberately does NOT do
+
+- No Hang 1 / Hang custom / Hang route handlers (Phase 7D-2).
+- No Finish route handler (Phase 7D-3).
+- No inventory decrement, no simulated-time advance.
+- No route-stop `pending → completed` flips.
+- No CRM table writes.
+- No message-automation calls (the Phase 6D GHL guardrail is not
+  even reached from any Phase 7D-1 code path).
+- No edit / delete / archive flows on sessions, routes, designs, or
+  activity rows.
+- No schema changes — the Phase 7B migration is sufficient.

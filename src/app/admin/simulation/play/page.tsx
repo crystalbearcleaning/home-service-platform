@@ -17,7 +17,11 @@ import { getActiveBusinessForUser } from "@/core/business/active-business";
 import {
   getActiveDoorHangerSimulationSession,
   isDoorHangerPluginEnabled,
+  listSelectableDesignsForStart,
+  listSelectableRoutesForStart,
   type ActiveDoorHangerSessionRow,
+  type StartFormDesignOption,
+  type StartFormRouteOption,
 } from "@/core/simulation/play-page-data";
 import {
   computeSessionProgress,
@@ -34,6 +38,7 @@ import {
   formatDurationSeconds,
 } from "@/plugins/door-hanger/simulation";
 import { SignOutButton } from "../../sign-out-button";
+import { StartSimulatedRouteForm } from "./start-form";
 
 export const dynamic = "force-dynamic";
 
@@ -137,6 +142,16 @@ export default async function SimulationPlayPage() {
     }),
   ]);
 
+  // Only fetch start-form prerequisites when the plugin is enabled
+  // AND no session is currently active — otherwise the form is hidden.
+  const [startRoutes, startDesigns] =
+    doorHangerEnabled && !session
+      ? await Promise.all([
+          listSelectableRoutesForStart(business.id),
+          listSelectableDesignsForStart(business.id),
+        ])
+      : [[] as StartFormRouteOption[], [] as StartFormDesignOption[]];
+
   return (
     <AdminShell {...shellChrome} signOutSlot={<SignOutButton />}>
       <PageHeader
@@ -182,7 +197,11 @@ export default async function SimulationPlayPage() {
           description="Plugins that expose a simulation adapter appear here."
         >
           {doorHangerEnabled ? (
-            <DoorHangerActionCard session={session} />
+            <DoorHangerActionCard
+              session={session}
+              startRoutes={startRoutes}
+              startDesigns={startDesigns}
+            />
           ) : (
             <EmptyState
               title="No simulation-capable plugins are available yet"
@@ -239,8 +258,12 @@ export default async function SimulationPlayPage() {
 
 function DoorHangerActionCard({
   session,
+  startRoutes,
+  startDesigns,
 }: {
   session: ActiveDoorHangerSessionRow | null;
+  startRoutes: StartFormRouteOption[];
+  startDesigns: StartFormDesignOption[];
 }) {
   const hasActive = session !== null;
   return (
@@ -251,6 +274,7 @@ function DoorHangerActionCard({
             <h3 className="text-sm font-semibold text-ink">Door Hangers</h3>
             <StatusBadge tone="success">enabled</StatusBadge>
             <StatusBadge tone="neutral">simulation adapter</StatusBadge>
+            {hasActive && <StatusBadge tone="warning">route in progress</StatusBadge>}
           </div>
           <p className="mt-1 max-w-prose text-xs text-ink-muted">
             Run simulated door hanger routes. Each action consumes
@@ -260,41 +284,45 @@ function DoorHangerActionCard({
             hanger.
           </p>
         </div>
-        <span className="rounded-pill border border-line bg-surface-muted px-2 py-1 text-[10px] uppercase tracking-wide text-ink-faint">
-          Coming next
-        </span>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <DisabledButton label="Start simulated route" disabled={hasActive} />
-        <DisabledButton label="Hang 1" disabled={!hasActive} />
-        <DisabledButton label="Hang custom" disabled={!hasActive} />
-        <DisabledButton label="Hang route" disabled={!hasActive} />
-      </div>
-
-      <p className="mt-3 text-[11px] text-ink-faint">
-        Gameplay actions are stubbed in Phase 7C. Wiring lands in Phase 7D —
-        no clicks here will create CRM outcomes, send messages, or change
-        inventory.
-      </p>
+      {hasActive ? (
+        <div className="mt-4 space-y-3">
+          <div className="grid grid-cols-3 gap-2">
+            <DisabledButton label="Hang 1" />
+            <DisabledButton label="Hang custom" />
+            <DisabledButton label="Hang route" />
+          </div>
+          <p className="text-[11px] text-ink-faint">
+            Hang actions wire up in the next step. The active session below is
+            tracked but no inventory / simulated time has changed.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-3">
+          <StartSimulatedRouteForm
+            routes={startRoutes}
+            designs={startDesigns}
+          />
+          <p className="text-[11px] text-ink-faint">
+            Starting a route flips it to <code>in_progress</code> and opens a
+            single active simulated session. No inventory / simulated time
+            changes on start.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
 
-function DisabledButton({
-  label,
-  disabled,
-}: {
-  label: string;
-  disabled: boolean;
-}) {
+function DisabledButton({ label }: { label: string }) {
   return (
     <button
       type="button"
       disabled
       aria-disabled="true"
-      title="Coming next (Phase 7D)"
-      className={`inline-flex items-center justify-center rounded-pill border border-line bg-surface-muted px-3 py-1.5 text-xs font-medium ${disabled ? "text-ink-faint" : "text-ink-muted"} cursor-not-allowed`}
+      title="Coming next (Phase 7D-2)"
+      className="inline-flex items-center justify-center rounded-pill border border-line bg-surface-muted px-3 py-1.5 text-xs font-medium text-ink-muted cursor-not-allowed"
     >
       {label}
     </button>

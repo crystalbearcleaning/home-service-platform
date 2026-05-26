@@ -113,6 +113,84 @@ export async function getActiveDoorHangerSimulationSession(input: {
   };
 }
 
+// -------------------------------------------------------------------------
+// Selectable routes + designs for the Start simulated route form
+// (Phase 7D-1). Read-only; the server-side Start action re-verifies
+// every FK before insert.
+// -------------------------------------------------------------------------
+
+export type StartFormRouteOption = {
+  id: string;
+  name: string;
+  status: "draft" | "ready" | "paused";
+  generatedFromSource: "manual" | "rentcast";
+  totalRouteStops: number;
+  targetHomeCount: number | null;
+};
+
+export type StartFormDesignOption = {
+  id: string;
+  name: string;
+  quantityRemaining: number;
+};
+
+// Routes in a startable status (draft / ready / paused). Excludes
+// in_progress and completed — the operator can't start one that's
+// already running. Sorted by created_at desc to surface fresh routes.
+export async function listSelectableRoutesForStart(
+  businessId: string,
+): Promise<StartFormRouteOption[]> {
+  if (!businessId) return [];
+  const sb = createServiceRoleClient();
+  const { data } = await sb
+    .from("door_hanger_routes")
+    .select(
+      "id,name,status,generated_from_source,total_route_stops,target_home_count",
+    )
+    .eq("business_id", businessId)
+    .in("status", ["draft", "ready", "paused"])
+    .order("created_at", { ascending: false })
+    .limit(100);
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    status: r.status as "draft" | "ready" | "paused",
+    generatedFromSource: r.generated_from_source as "manual" | "rentcast",
+    totalRouteStops: Number(r.total_route_stops ?? 0),
+    targetHomeCount:
+      r.target_home_count === null || r.target_home_count === undefined
+        ? null
+        : Number(r.target_home_count),
+  }));
+}
+
+// Designs with remaining inventory > 0. Computed app-side because
+// PostgREST does not support `column > other_column` filters.
+export async function listSelectableDesignsForStart(
+  businessId: string,
+): Promise<StartFormDesignOption[]> {
+  if (!businessId) return [];
+  const sb = createServiceRoleClient();
+  const { data } = await sb
+    .from("door_hanger_designs")
+    .select("id,name,quantity_received,quantity_used")
+    .eq("business_id", businessId)
+    .order("created_at", { ascending: false })
+    .limit(100);
+  const rows = (data ?? []).map((d) => {
+    const remaining = Math.max(
+      0,
+      Number(d.quantity_received ?? 0) - Number(d.quantity_used ?? 0),
+    );
+    return {
+      id: d.id,
+      name: d.name,
+      quantityRemaining: remaining,
+    };
+  });
+  return rows.filter((r) => r.quantityRemaining > 0);
+}
+
 // Is the Door Hanger plugin installed + enabled on this workspace?
 // Used to decide whether the play page renders the Door Hanger card.
 // Phase 7C only checks `door_hanger`; future plugins with their own
