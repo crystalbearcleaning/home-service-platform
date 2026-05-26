@@ -415,3 +415,99 @@ If implemented in later Phase 6 sub-phases:
 
 Phase 6A ends at docs only. Phase 6B is the first step that touches
 code, and it only ships after this doc is reviewed and approved.
+
+---
+
+## Appendix A — Phase 6B-1 simulation workspace seed (delivered)
+
+**Status:** schema + seed created. Migration and seed **not applied** —
+the operator runs `supabase db push` (or equivalent) and
+`supabase/seed/run_seed.sh` when ready.
+**Added:** 2026-05-25.
+
+Phase 6B-1 delivers the §3 + §9 "Phase 6B" foundation: the
+`is_simulation` sentinel and a Crystal Bear Simulation workspace with
+the Door Hanger plugin installed. **No save-file schema, no
+workspace switcher, no banner, and no gameplay.**
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `supabase/migrations/20260526120000_phase_6_simulation_workspace.sql` | Adds `businesses.is_simulation boolean not null default false`. Idempotent (`add column if not exists`). |
+| `supabase/seed/phase_6_seed.sql` | Idempotent seed: Crystal Bear Simulation `businesses` row (`is_simulation=true`), Owner / Admin `business_roles` row, Door Hanger `installed_plugins` row (`status='enabled'`), and admin membership link via `__SEED_ADMIN_EMAIL__`. |
+| `supabase/seed/run_seed.sh` | Wired to apply Phase 6 seed after Phase 5, reusing the existing `SEED_ADMIN_EMAIL` placeholder substitution. |
+| `supabase/seed/PHASE_6_VERIFICATION.sql` | Read-only SQL checks: column exists, real Crystal Bear stays `false`, simulation workspace exists + `true`, Door Hanger installed/enabled, zero `door_hanger_*` and zero CRM records on the simulation workspace. |
+| `schema.md` §1 | Documents the new `is_simulation` column. |
+
+### Sentinel decision
+
+The §3 sentinel decision lands on **Option B**: a single
+`businesses.is_simulation boolean` column. Reasoning: one place to
+read, no slug coupling, trivially queryable, future-proof for the
+Phase 6D adapter guardrail and any future per-workspace UI.
+
+The boolean **lives only on `businesses`**. No other table receives an
+`is_simulation` flag — the workspace boundary is the safety boundary,
+enforced by existing `business_id` scoping + RLS.
+
+### Workspace seeded
+
+| Field | Value |
+|---|---|
+| `slug` | `crystal-bear-simulation` |
+| `name` | `Crystal Bear Simulation` |
+| `primary_industry` | `window_cleaning` (matches the real workspace) |
+| `timezone` | `America/New_York` |
+| `currency` | `USD` |
+| `status` | `active` |
+| `is_simulation` | `true` |
+
+The real Crystal Bear workspace (`slug=crystal-bear`) is **not
+touched** by the Phase 6 seed; it keeps `is_simulation=false` via the
+column default.
+
+### What the seed deliberately does NOT do
+
+- Does **not** seed `service_areas`, `services`, `service_plans`,
+  `price_rules`, or `business_settings` on the simulation workspace.
+  The Auto-Quote / Customer Quote plugins are not installed on the
+  simulation workspace, so none of those settings are required yet.
+- Does **not** seed `app_surfaces` for the simulation workspace —
+  there is no `/q` flow for the simulation business and the admin
+  shell resolves by membership, not by surface.
+- Does **not** create any `simulation_runs` table or row — that lands
+  in Phase 6C.
+- Does **not** install the Window Cleaning Auto-Quote or Customer
+  Quote / Sales Page plugins on the simulation workspace. Only
+  Door Hanger is installed, matching the Phase 6 scope ("the Door
+  Hanger Plugin should be the first plugin with a simulation
+  adapter").
+- Does **not** create any `door_hanger_designs`, `door_hanger_campaigns`,
+  `door_hanger_routes`, `door_hanger_route_stops`, or
+  `door_hanger_distribution_sessions` rows on the simulation workspace.
+
+### Membership / RLS posture
+
+The seed adds the `SEED_ADMIN_EMAIL` user as Owner / Admin on the
+simulation workspace via the same pattern Phase 1 uses for the real
+workspace: `user_profiles` + `business_memberships` +
+`membership_roles`. Without this row, RLS would correctly hide the
+simulation workspace from the admin user.
+
+No RLS policies were changed. The existing `is_business_member()`
+helper continues to gate all reads — it works on the simulation
+workspace the same way it works on the real one.
+
+### Not applied
+
+The migration and seed are **created but not yet applied**. The
+operator runs:
+
+```
+supabase db push           # apply Phase 6B-1 migration
+supabase/seed/run_seed.sh  # apply seeds in order (Phase 1 → 3 → 5 → 6)
+```
+
+Re-applying is safe: the migration uses `add column if not exists`,
+and the seed uses `on conflict … do update` for every insert.

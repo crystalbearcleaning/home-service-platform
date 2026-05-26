@@ -23,6 +23,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 PHASE_1_SQL="${SCRIPT_DIR}/phase_1_seed.sql"
 PHASE_3_SQL="${SCRIPT_DIR}/phase_3_seed.sql"
 PHASE_5_SQL="${SCRIPT_DIR}/phase_5_seed.sql"
+PHASE_6_SQL="${SCRIPT_DIR}/phase_6_seed.sql"
 ENV_FILE="${PROJECT_ROOT}/.env.local"
 
 # Make sure Homebrew bin is on PATH (no-op if already there).
@@ -37,7 +38,7 @@ if ! command -v supabase >/dev/null 2>&1; then
   exit 1
 fi
 
-for f in "$PHASE_1_SQL" "$PHASE_3_SQL" "$PHASE_5_SQL"; do
+for f in "$PHASE_1_SQL" "$PHASE_3_SQL" "$PHASE_5_SQL" "$PHASE_6_SQL"; do
   if [ ! -f "$f" ]; then
     echo "ERROR: seed SQL not found at $f" >&2
     exit 1
@@ -121,5 +122,6 @@ apply_seed_plain() {
 apply_seed "Phase 1 seed" "$PHASE_1_SQL" "__SEED_ADMIN_EMAIL__" "$ESCAPED_EMAIL"
 apply_seed "Phase 3 seed" "$PHASE_3_SQL" "__SEED_NOTIFICATION_PHONE_E164__" "$ESCAPED_PHONE"
 apply_seed_plain "Phase 5 seed" "$PHASE_5_SQL"
+apply_seed "Phase 6 seed" "$PHASE_6_SQL" "__SEED_ADMIN_EMAIL__" "$ESCAPED_EMAIL"
 
 echo "All seeds complete. Review the NOTICE lines above for skipped optional steps."

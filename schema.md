@@ -84,6 +84,7 @@ One row per business/workspace.
 | `timezone` | `text` | NOT NULL, default `'America/New_York'` | |
 | `currency` | `text` | NOT NULL, default `'USD'` | |
 | `status` | `text` | NOT NULL, default `'active'` | `active`, `inactive` |
+| `is_simulation` | `boolean` | NOT NULL, default `false` | Phase 6: true for simulation workspaces (e.g. `Crystal Bear Simulation`). Read by adapters (SMS / email / payments / future integrations) to short-circuit real external side effects. Existing workspaces default to `false`. |
 | `created_at` | `timestamptz` | NOT NULL, default `now()` | |
 | `updated_at` | `timestamptz` | NOT NULL, default `now()` | |
 
