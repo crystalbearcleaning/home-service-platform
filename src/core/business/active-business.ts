@@ -4,6 +4,7 @@ export type ActiveBusinessSummary = {
   id: string;
   slug: string;
   name: string;
+  isSimulation: boolean;
   membershipId: string;
   roleName: string | null;
   roleKey: string | null;
@@ -29,7 +30,7 @@ export async function getActiveBusinessForUser(
 
   const { data: business } = await supabase
     .from("businesses")
-    .select("id, slug, name")
+    .select("id, slug, name, is_simulation")
     .eq("id", membership.business_id)
     .single();
 
@@ -72,6 +73,7 @@ export async function getActiveBusinessForUser(
     id: business.id,
     slug: business.slug,
     name: business.name,
+    isSimulation: Boolean(business.is_simulation),
     membershipId: membership.id,
     roleName,
     roleKey,

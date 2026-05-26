@@ -20,7 +20,8 @@ export type AdminIconKey =
   | "menu"
   | "close"
   | "broadcast"
-  | "megaphone";
+  | "megaphone"
+  | "flask";
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
@@ -128,6 +129,13 @@ const ICONS: Record<AdminIconKey, (props: IconProps) => React.ReactElement> = {
     <Base {...p}>
       <path d="M4 10v4a1 1 0 0 0 1 1h3l8 4V5L8 9H5a1 1 0 0 0-1 1Z" />
       <path d="M18 9a3 3 0 0 1 0 6" />
+    </Base>
+  ),
+  flask: (p) => (
+    <Base {...p}>
+      <path d="M9 3h6" />
+      <path d="M10 3v6L5 19a2 2 0 0 0 1.8 3h10.4A2 2 0 0 0 19 19l-5-10V3" />
+      <path d="M7.5 14h9" />
     </Base>
   ),
 };

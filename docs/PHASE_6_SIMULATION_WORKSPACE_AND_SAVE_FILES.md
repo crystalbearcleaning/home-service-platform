@@ -511,3 +511,78 @@ supabase/seed/run_seed.sh  # apply seeds in order (Phase 1 → 3 → 5 → 6)
 
 Re-applying is safe: the migration uses `add column if not exists`,
 and the seed uses `on conflict … do update` for every insert.
+
+---
+
+## Appendix B — Phase 6C simulation_runs schema + admin UI (delivered)
+
+**Status:** schema + admin UI created. Migration **not applied** —
+the operator runs `supabase db push` when ready.
+**Added:** 2026-05-26.
+
+Phase 6C delivers the §4 + §5 save / run foundation: a
+`simulation_runs` table, the `/admin/simulation` admin page, and
+create + mark-active server actions. **No workspace switcher, no
+Simulation Mode banner, no gameplay, no CRM writes.**
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `supabase/migrations/20260526130000_phase_6_simulation_runs.sql` | Creates `simulation_runs` (id, business_id, name, starting/current cash cents, simulated start/current timestamps, status, notes, timestamps), indexes, CHECK constraints, RLS enable + Pattern B members-SELECT policy. |
+| `src/core/simulation/validation.ts` | Pure helpers: status taxonomy, `parseCashDollarsToCents`, `parseSimulatedStart`, `validateSimulationRunForm`, `statusesAfterMarkingActive`, `formatCentsAsDollars`. |
+| `src/core/simulation/validation.test.ts` | 25 unit tests for the helpers (cash parsing, date parsing, status enum, full form validation, demote-then-promote rule, dollar formatting). |
+| `src/core/simulation/admin-data.ts` | Server-only reads: `listSimulationRuns`, `getActiveSimulationRun`. |
+| `src/core/simulation/admin-create.ts` | Server-only writes: `createSimulationRun`, `markSimulationRunActive`. Both verify `businesses.is_simulation = true` via service-role lookup before any DB write. |
+| `src/app/admin/simulation/actions.ts` | `"use server"` actions: `createSimulationRunAction`, `markSimulationRunActiveAction`. Auth + active-business + simulation-workspace gates before touching the core helpers. |
+| `src/app/admin/simulation/forms.tsx` | Client components: `SimulationRunCreateForm`, `MakeActiveButton`. |
+| `src/app/admin/simulation/page.tsx` | `/admin/simulation` dashboard: active-save card + list + create form, or "Switch to a simulation workspace" empty state. |
+| `src/core/business/active-business.ts` | Extended `ActiveBusinessSummary` with `isSimulation: boolean` (reads the Phase 6B-1 column). |
+| `src/components/admin/nav-config.ts` | New **Simulation** nav group with one entry: **Saves** → `/admin/simulation`. Inserted between Marketing and Automations. |
+| `src/components/admin/icons.tsx` | New `flask` icon for the Simulation nav. |
+| `src/components/admin/nav-config.test.ts` | Updated to pin the new group order + the Simulation → Saves entry. |
+| `schema.md` §22c | Documents `simulation_runs`. |
+
+### Single-active-save enforcement (§5)
+
+Enforced **in application code**, not at the DB level. The
+`statusesAfterMarkingActive` pure helper computes the demote list
+("which prior `active` rows drop to `paused`?") given the current
+sibling rows and the target id, and the server action applies those
+updates before flipping the target to `active`. `archived` and
+`draft` rows are never touched.
+
+When a new save is created with `markActive = true`, the same demote
+step runs before the insert so the rule holds across reload mid-flight.
+
+### Workspace gating
+
+`/admin/simulation` is reachable from any workspace's nav but **only
+renders the saves UI on a simulation workspace**. On a real workspace
+the page shows a friendly empty state:
+
+> "Switch to a simulation workspace to manage saves. Workspace
+> switching ships in Phase 6D."
+
+Server actions independently enforce the same rule
+(`NOT_SIMULATION_WORKSPACE`) — the UI gate is informational; the
+write gate is load-bearing.
+
+### What Phase 6C deliberately does NOT do
+
+- No workspace switcher (Phase 6D).
+- No Simulation Mode banner (Phase 6D).
+- No side-effect guardrails on adapters (Phase 6D).
+- No edit / delete / archive flows.
+- No clock-advance buttons / cash-mutation actions.
+- No Door Hanger gameplay (Phase 7+).
+- No CRM lead / quote / task generation from simulation.
+- No seed rows in `simulation_runs` — operator creates their first
+  save in the UI.
+
+### Not applied
+
+The migration is **created but not applied**. Operator runs
+`supabase db push` when ready. The migration uses `create table`
+(forward-only, matches the Phase 1 / 5 pattern) and `drop policy if
+exists` so re-applying is safe in dev.

@@ -74,6 +74,16 @@ const RAW_NAV: AdminNavGroup[] = [
     ],
   },
   {
+    label: "Simulation",
+    items: [
+      {
+        label: "Saves",
+        href: "/admin/simulation",
+        icon: "flask",
+      },
+    ],
+  },
+  {
     label: "Automations",
     items: [
       {

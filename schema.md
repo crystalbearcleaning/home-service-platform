@@ -84,7 +84,7 @@ One row per business/workspace.
 | `timezone` | `text` | NOT NULL, default `'America/New_York'` | |
 | `currency` | `text` | NOT NULL, default `'USD'` | |
 | `status` | `text` | NOT NULL, default `'active'` | `active`, `inactive` |
-| `is_simulation` | `boolean` | NOT NULL, default `false` | Phase 6: true for simulation workspaces (e.g. `Crystal Bear Simulation`). Read by adapters (SMS / email / payments / future integrations) to short-circuit real external side effects. Existing workspaces default to `false`. |
+| `is_simulation` | `boolean` | NOT NULL, default `false` | Phase 6: true for simulation workspaces (e.g. `Crystal Bear Simulation`). Read by adapters (SMS / email / payments / future integrations) to short-circuit real external side effects. Existing workspaces default to `false`. Related: `simulation_runs` (§22c). |
 | `created_at` | `timestamptz` | NOT NULL, default `now()` | |
 | `updated_at` | `timestamptz` | NOT NULL, default `now()` | |
 
@@ -1155,6 +1155,59 @@ table.
 - One `installed_plugins` row per Crystal Bear (`status='enabled'`).
 - **No** demo campaigns / inventory / routes / sessions — operator
   creates these manually once the Marketing UI ships in Phase 5B-2.
+
+---
+
+## 22c. Simulation (Phase 6)
+
+The Phase 6 simulation workspace is **not** a new table — it is a row
+in `businesses` with `is_simulation = true`. The §1 table now carries
+that boolean (default `false`, real workspaces unaffected).
+
+Save files / runs are a new plugin-style table that lives only inside
+a simulation workspace and is gated to it by application code (server
+actions verify `businesses.is_simulation` before insert).
+
+### `simulation_runs` (Phase 6C)
+
+One row per save file / playable timeline inside a simulation
+workspace.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `uuid` | PK, default `gen_random_uuid()` | |
+| `business_id` | `uuid` | NOT NULL, FK → `businesses(id)` ON DELETE CASCADE | Must be a workspace with `is_simulation=true` (enforced in server actions). |
+| `name` | `text` | NOT NULL, CHECK `length(btrim(name)) > 0` | Required, human-readable. |
+| `starting_cash_cents` | `bigint` | NOT NULL, CHECK ≥ 0 | Immutable by convention (no edit flow in Phase 6C). |
+| `current_cash_cents` | `bigint` | NOT NULL, CHECK ≥ 0 | Seeded equal to `starting_cash_cents`; future gameplay mutates. |
+| `simulated_start_at` | `timestamptz` | NOT NULL | Initial simulated date/time. |
+| `simulated_current_at` | `timestamptz` | NOT NULL, CHECK ≥ `simulated_start_at` | Seeded equal to `simulated_start_at`; future gameplay advances. |
+| `status` | `text` | NOT NULL, default `'draft'`, CHECK in (`draft`, `active`, `paused`, `archived`) | Single-active-save rule enforced in server actions. |
+| `notes` | `text` | NULLABLE | Operator notes. |
+| `created_at` | `timestamptz` | NOT NULL, default `now()` | |
+| `updated_at` | `timestamptz` | NOT NULL, default `now()` | |
+
+**Indexes:**
+- `idx_simulation_runs_business` on `(business_id)`
+- `idx_simulation_runs_business_status` on `(business_id, status)`
+- `idx_simulation_runs_business_created` on `(business_id, created_at desc)`
+
+**RLS:** Pattern B (matches Phase 1 `contacts/leads/quotes/tasks` and
+Phase 5 `door_hanger_*`). Authenticated business members may
+`SELECT`; `INSERT / UPDATE / DELETE` go through the Phase 6C admin
+server actions using the service-role client.
+
+**Single-active-save rule:** at most one row per `business_id` has
+`status = 'active'`. The rule is enforced by
+`markSimulationRunActiveAction` / `createSimulationRunAction` (in
+`src/app/admin/simulation/actions.ts`) — when a save is marked
+active, every other `status='active'` row on the same workspace drops
+to `paused`. `draft` and `archived` rows are not touched. A partial
+unique index was considered and rejected for Phase 6C because the
+demote-then-promote sequence is cleaner in app code.
+
+**Phase 6C does NOT seed any rows.** The operator creates their first
+save in the `/admin/simulation` UI.
 
 ---
 
