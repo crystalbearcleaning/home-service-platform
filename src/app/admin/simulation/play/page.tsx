@@ -38,6 +38,7 @@ import {
   formatDurationSeconds,
 } from "@/plugins/door-hanger/simulation";
 import { SignOutButton } from "../../sign-out-button";
+import { HangActionsCard } from "./hang-actions";
 import { StartSimulatedRouteForm } from "./start-form";
 
 export const dynamic = "force-dynamic";
@@ -288,14 +289,17 @@ function DoorHangerActionCard({
 
       {hasActive ? (
         <div className="mt-4 space-y-3">
-          <div className="grid grid-cols-3 gap-2">
-            <DisabledButton label="Hang 1" />
-            <DisabledButton label="Hang custom" />
-            <DisabledButton label="Hang route" />
-          </div>
+          <HangActionsCard
+            secondsPerHanger={
+              session.secondsPerHanger ?? DOOR_HANGER_DEFAULT_SECONDS_PER_HANGER
+            }
+            remainingInventory={session.designQuantityRemaining ?? 0}
+            remainingTarget={resolveRemainingTarget(session)}
+          />
           <p className="text-[11px] text-ink-faint">
-            Hang actions wire up in the next step. The active session below is
-            tracked but no inventory / simulated time has changed.
+            Each Hang action atomically decrements inventory, updates the
+            session, advances the simulated clock, and completes route stops
+            when present. No CRM rows are written.
           </p>
         </div>
       ) : (
@@ -315,18 +319,22 @@ function DoorHangerActionCard({
   );
 }
 
-function DisabledButton({ label }: { label: string }) {
-  return (
-    <button
-      type="button"
-      disabled
-      aria-disabled="true"
-      title="Coming next (Phase 7D-2)"
-      className="inline-flex items-center justify-center rounded-pill border border-line bg-surface-muted px-3 py-1.5 text-xs font-medium text-ink-muted cursor-not-allowed"
-    >
-      {label}
-    </button>
-  );
+// Best-effort remaining target for the Hang route preview. Returns the
+// pending-stops count if route_stops exist; otherwise target -
+// distributed; otherwise null (count-only fallback with no target).
+function resolveRemainingTarget(
+  session: ActiveDoorHangerSessionRow,
+): number | null {
+  if (session.routeTotalStops !== null && session.routeTotalStops > 0) {
+    return Math.max(0, session.routeTotalStops - session.hangersDistributed);
+  }
+  if (session.routeTargetHomeCount !== null) {
+    return Math.max(
+      0,
+      session.routeTargetHomeCount - session.hangersDistributed,
+    );
+  }
+  return null;
 }
 
 function ActiveSessionCard({

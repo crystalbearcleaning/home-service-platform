@@ -1052,3 +1052,129 @@ that this helper does not.
 - No edit / delete / archive flows on sessions, routes, designs, or
   activity rows.
 - No schema changes — the Phase 7B migration is sufficient.
+
+---
+
+## Appendix D — Phase 7D-2 Hang actions (delivered)
+
+**Status:** Hang 1 / Hang custom / Hang route shipped. **No CRM
+outcomes.** **One new migration: a Postgres function for atomicity.**
+**Added:** 2026-05-27.
+
+Phase 7D-2 wires §§5.2–5.5, §6, §7, §10, §11 of the Phase 7 doc.
+Operators on `/admin/simulation/play` with an active session can now
+consume inventory, advance the simulated clock, complete route stops,
+and auto-finish a route when it's fully walked.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `supabase/migrations/20260528120000_phase_7_door_hanger_hang_rpc.sql` | Defines `public.door_hanger_simulation_hang(business_id, simulation_run_id, session_id, action_kind, requested_count) returns jsonb`. `security definer`, `set search_path = public`, `revoke all from public`, `grant execute to service_role`. |
+| `src/core/door-hanger/simulation-hang.ts` | Thin TS wrapper: `performHangAction({ businessId, simulationRunId, sessionId, actionKind, requestedCount? })`. Maps known `raise exception` codes (`NO_ACTIVE_SESSION`, `INSUFFICIENT_INVENTORY`, `ROUTE_ALREADY_COMPLETE`, etc.) to friendly messages + structured codes. |
+| `src/app/admin/simulation/play/actions.ts` | Added `hangOneAction`, `hangCustomAction({ amount })`, `hangRouteAction`. All resolve auth + active save + active session, then delegate to `performHangAction`. Revalidates `/admin/simulation/play` + `/admin/marketing/door-hangers`. |
+| `src/app/admin/simulation/play/hang-actions.tsx` | Client `<HangActionsCard>`. Three controls (Hang 1 / Hang custom input + button / Hang route). Live time-cost preview using `formatDurationSeconds`. Success banner shows summary + time advanced + `capped_by` notice + route-completion placeholder. |
+| `src/app/admin/simulation/play/page.tsx` | When `hasActive`, renders `<HangActionsCard>` instead of the disabled buttons. Adds `resolveRemainingTarget(session)` helper for the preview. |
+
+### Atomicity approach
+
+**One Postgres function, one transaction.** PL/pgSQL functions run
+inside a single implicit transaction. The function locks each row it
+touches (`select ... for update` on session + design + route +
+simulation_run, plus `for update` on the `with`-clause that picks
+the next N pending stops), so concurrent Hang calls on the same
+session serialize cleanly.
+
+Validation `raise exception` rolls back any uncommitted work —
+**partial writes are impossible**. The known business errors raised
+(`NO_ACTIVE_SESSION`, `NO_ACTIVE_SAVE`, `DESIGN_NOT_FOUND`,
+`ROUTE_NOT_FOUND`, `SESSION_MISSING_SECONDS_PER_HANGER`,
+`SESSION_MISSING_DESIGN`, `SESSION_MISSING_ROUTE`,
+`INSUFFICIENT_INVENTORY`, `ROUTE_ALREADY_COMPLETE`,
+`INVALID_AMOUNT`, `INVALID_ACTION_KIND`, `INVALID_INPUT`) are
+mapped to friendly messages in the TS wrapper.
+
+The function is `security definer` because the tables it writes
+(simulation_activity, door_hanger_*, simulation_runs) all have RLS
+enabled. EXECUTE is granted only to `service_role`. The application
+calls it via the existing service-role client, so the surface area
+mirrors the Pattern B posture used everywhere else.
+
+### Hang 1 / Hang custom / Hang route behavior
+
+| Action | requested | RPC compute | UI feedback |
+|---|---|---|---|
+| Hang 1 | 1 | `least(1, inventory, remaining_target)` | "+30s" preview, success banner with effective count |
+| Hang custom | operator-entered N | `least(N, inventory, remaining_target)` | "+N×30s" preview, `capped_by` notice when applicable |
+| Hang route | (RPC reads `remaining_target`) | `least(inventory, remaining_target)` | "+N remaining" preview; auto-finish when route exhausted |
+
+`remaining_target` resolution (RPC §7):
+- **Route stops exist** → count of pending stops on that route.
+- **No stops + target set** → `target_home_count - hangers_distributed`.
+- **No stops + no target** → fall back to remaining inventory. Hang
+  Route in this branch always auto-completes; Hang 1 / Hang custom
+  do not auto-complete.
+
+### Inventory / time / session / stop behavior
+
+For effective N inside the same transaction:
+1. `door_hanger_designs.quantity_used += N` (DB CHECK
+   `quantity_used <= quantity_received` is the safety net).
+2. `door_hanger_distribution_sessions`:
+   `hangers_distributed += N`,
+   `time_spent_seconds += N * seconds_per_hanger`,
+   `material_cost_cents += N * cost_per_hanger_cents` (when set),
+   `distributed_at = new_simulated_at`.
+3. `door_hanger_route_stops`: next N pending stops
+   (`order by stop_order asc nulls last, created_at asc`) →
+   `status = 'completed'`, `completed_at = new_simulated_at`.
+   Skipped when no stops exist.
+4. `simulation_runs.simulated_current_at += N * seconds_per_hanger`.
+5. Append primary `simulation_activity` row.
+6. On completion: `door_hanger_routes.status = 'completed'` +
+   `last_completed_at`; `door_hanger_distribution_sessions.status =
+   'completed'` + `ended_at`; append `door_hanger.route_completed`
+   and `door_hanger.session_completed` activity rows.
+
+### Activity behavior
+
+Every successful Hang writes exactly one primary activity row with
+metadata `{ session_id, route_id, design_id, requested_count,
+effective_count, seconds_per_hanger, time_advanced_seconds,
+capped_by }`. On auto-completion the RPC writes two additional rows
+(`door_hanger.route_completed` + `door_hanger.session_completed`)
+in the same transaction. No core `events`, `activities`,
+`notification_logs`, `tasks`, `contacts`, `leads`, or `quotes` rows
+are touched.
+
+### Tests
+
+The atomic logic lives in the RPC, which cannot be exercised
+without a live DB. The TS-side helpers (`computeEffectiveHangCount`,
+`computeTimeAdvanceSeconds`, `isRouteComplete`,
+`formatHangActivitySummary`, `formatDurationSeconds`) are already
+covered by the 40 Phase 7B unit tests in
+`src/plugins/door-hanger/simulation/adapter.test.ts` — the RPC
+implements the same rules in PL/pgSQL. No new pure tests were added
+for Phase 7D-2 because the gameplay surface is the RPC itself.
+
+### Not applied
+
+The migration is **created but not applied**. The operator runs
+`supabase db push` when ready. The function uses `create or replace
+function` so re-applying in dev is safe.
+
+### What Phase 7D-2 deliberately does NOT do
+
+- No quote-request, lead, contact, task, job, note, issue,
+  notification, or message-automation writes.
+- No GHL SMS calls (the Phase 6D guardrail is not reached).
+- No delayed-response timers.
+- No maps / GPS / pin / drawing UI.
+- No route cooldown filtering.
+- No operator-initiated Finish-route control (auto-finish only when
+  a Hang action exhausts the route). A manual Finish-early control
+  may land in Phase 7D-3.
+- No edit / delete / archive flows on sessions, routes, designs,
+  or activity rows.
+- No new schema beyond the single RPC migration.
