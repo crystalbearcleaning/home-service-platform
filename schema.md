@@ -1211,6 +1211,84 @@ save in the `/admin/simulation` UI.
 
 ---
 
+## 22d. Simulation Play (Phase 7B)
+
+Phase 7B is **additive**. It does not create new core CRM tables and
+does not modify `simulation_runs`. It extends three existing Door
+Hanger tables with nullable simulation columns and introduces one new
+table — `simulation_activity` — that holds the gameplay feed shown on
+the future `/admin/simulation/play` page (Phase 7C+).
+
+Source of truth:
+`docs/PHASE_7_SIMULATION_PLAY_AND_DOOR_HANGER_ADAPTER.md` §§5, 7, 9,
+10, 11, 12.
+
+### `door_hanger_distribution_sessions` (additive columns)
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `simulation_run_id` | `uuid` | NULLABLE, FK → `simulation_runs(id)` ON DELETE SET NULL | NULL for `mode='real'`. Simulated sessions carry the active save's id (enforced in application code). |
+| `seconds_per_hanger` | `integer` | NULLABLE, CHECK `seconds_per_hanger IS NULL OR >= 1` | Session-level time cost. Default 30 set at insert time by the Phase 7D adapter (not a DB default). |
+| `status` | `text` | NOT NULL default `'completed'`, CHECK in (`active`, `completed`, `paused`) | Existing Phase 5B real-mode rows backfill to `'completed'` via the default. Simulated sessions start `'active'` and flip on Finish (§11). |
+| `started_at` | `timestamptz` | NULLABLE | Set when status flips to `active`. Mirrors `distributed_at` for historical real-mode rows when needed. |
+| `ended_at` | `timestamptz` | NULLABLE, CHECK `started_at IS NULL OR ended_at IS NULL OR ended_at >= started_at` | Set when status flips to `completed` or `paused`. |
+
+**Indexes:**
+- `idx_door_hanger_sessions_simulation_run` on `(simulation_run_id)`
+- `idx_door_hanger_sessions_business_status` on `(business_id, status)`
+
+The existing `mode` column (`real | simulated`) continues to gate
+which rows participate in Phase 7 gameplay queries. Phase 7B does not
+change RLS posture on this table.
+
+### `door_hanger_routes` (additive column)
+
+| Column | Type | Notes |
+|---|---|---|
+| `last_completed_at` | `timestamptz` NULLABLE | Set when a route is genuinely completed (Phase 7D Finish flow). NULL until the route is finished. Cooldown filtering (default 2-month) is deferred. |
+
+### `door_hanger_route_stops` (additive column)
+
+| Column | Type | Notes |
+|---|---|---|
+| `completed_at` | `timestamptz` NULLABLE | Set when a stop's `status` flips to `completed` by the Phase 7D Hang actions. NULL otherwise. |
+
+### `simulation_activity` (new table)
+
+One row per gameplay event inside a simulation save. Deliberately
+separate from core `events` and `activities` so simulation traffic
+does not pollute real CRM observability and existing queries do not
+need a simulation filter.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `uuid` | PK, default `gen_random_uuid()` | |
+| `business_id` | `uuid` | NOT NULL, FK → `businesses(id)` ON DELETE CASCADE | Simulation workspace. |
+| `simulation_run_id` | `uuid` | NOT NULL, FK → `simulation_runs(id)` ON DELETE CASCADE | Save file the event belongs to. Cascade matches expected reset semantics. |
+| `plugin_key` | `text` | NULLABLE | `door_hanger` for Phase 7 rows. Future plugins write their own key. |
+| `action_type` | `text` | NOT NULL, CHECK `length(btrim(action_type)) > 0` | e.g. `door_hanger.session_started`, `door_hanger.hang_one`. Taxonomy lives in `src/plugins/door-hanger/simulation/adapter.ts`. |
+| `summary` | `text` | NOT NULL, CHECK `length(btrim(summary)) > 0` | One-line human-readable string for the feed. |
+| `simulated_at` | `timestamptz` | NOT NULL | Value of `simulation_runs.simulated_current_at` **after** the action committed. |
+| `metadata` | `jsonb` | NULLABLE | Optional structured payload (route id, stop count, inventory delta). Schema not enforced. |
+| `created_at` | `timestamptz` | NOT NULL, default `now()` | Real wall-clock insert. Feed ordering uses this. |
+
+**Indexes:**
+- `idx_simulation_activity_business` on `(business_id)`
+- `idx_simulation_activity_run_created` on `(simulation_run_id, created_at desc)`
+- `idx_simulation_activity_business_created` on `(business_id, created_at desc)`
+- `idx_simulation_activity_action_type` on `(action_type)`
+
+**RLS:** Pattern B. Authenticated business members may `SELECT`;
+`INSERT / UPDATE / DELETE` go through `appendSimulationActivity`
+(`src/core/simulation/activity.ts`) using the service-role client.
+
+**Phase 7B does NOT seed any rows** — the operator generates these by
+playing the simulation in Phase 7D+. No gameplay UI exists yet at the
+close of Phase 7B; the table sits ready for Phase 7C/7D to write
+into.
+
+---
+
 ## 23. Deferred Tables
 
 Do not implement these in Phase 1 unless explicitly re-scoped later:

@@ -715,3 +715,126 @@ Phase 7 is successful when:
 
 Phase 7A ends at docs only. Phase 7B is the first step that touches
 code, and it only ships after this doc is reviewed and approved.
+
+---
+
+## Appendix A — Phase 7B schema + adapter scaffold (delivered)
+
+**Status:** schema migration + simulation_activity helpers + Door
+Hanger simulation adapter scaffold + pure unit tests created.
+**Migration not applied** — the operator runs `supabase db push` (or
+equivalent) when ready.
+**Added:** 2026-05-27.
+
+Phase 7B delivers the §§5, 7, 9, 10, 12 foundation: the additive
+session / route / stop columns, the new `simulation_activity` table,
+the server-only `appendSimulationActivity` / `listSimulationActivityForRun`
+helpers, and the Door Hanger simulation adapter scaffold (assumptions
++ pure helpers + action / activity-type taxonomies). **No
+`/admin/simulation/play` page, no gameplay UI, no CRM writes, no
+message-engine calls.**
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `supabase/migrations/20260527120000_phase_7_simulation_play.sql` | Adds `simulation_run_id` / `seconds_per_hanger` / `status` / `started_at` / `ended_at` on `door_hanger_distribution_sessions`; adds `last_completed_at` on `door_hanger_routes`; adds `completed_at` on `door_hanger_route_stops`; creates `simulation_activity` table + indexes + RLS Pattern B (members SELECT). All `add column if not exists` / `create table if not exists` / guarded CHECK additions — idempotent. |
+| `src/core/simulation/activity.ts` | Server-only `appendSimulationActivity` (insert via service-role; basic-input validation before DB round-trip) and `listSimulationActivityForRun` (read newest-first, limit-capped at 200, default 50). |
+| `src/plugins/door-hanger/simulation/assumptions.ts` | `DOOR_HANGER_DEFAULT_SECONDS_PER_HANGER = 30`, `[MIN, MAX] = [1, 600]`, pure `parseSecondsPerHanger` helper. |
+| `src/plugins/door-hanger/simulation/helpers.ts` | Pure helpers: `computeEffectiveHangCount`, `computeTimeAdvanceSeconds`, `formatDurationSeconds`, `isRouteComplete`, activity-summary formatters. |
+| `src/plugins/door-hanger/simulation/adapter.ts` | Action key taxonomy (`start_route` / `hang_one` / `hang_custom` / `hang_route` / `finish_route`), activity-type taxonomy (`door_hanger.session_started` / `.hang_one` / `.hang_custom` / `.hang_route` / `.route_completed` / `.session_completed` / `.session_ended_early`), `DOOR_HANGER_SIMULATION_ADAPTER` manifest, type guards. |
+| `src/plugins/door-hanger/simulation/index.ts` | Barrel re-exporting the assumption + adapter + helper symbols. |
+| `src/plugins/door-hanger/simulation/adapter.test.ts` | Pure unit tests for assumptions / taxonomies / manifest / `computeEffectiveHangCount` / `computeTimeAdvanceSeconds` / `formatDurationSeconds` / `isRouteComplete` / summary formatters. |
+| `schema.md` §22d | Documents the additive columns + `simulation_activity` table. |
+
+### Migration shape (§12)
+
+The migration is additive and idempotent. Every alter uses `add
+column if not exists`; every CHECK is wrapped in a guarded `do $$`
+block; the new table uses `create table if not exists` plus `drop
+policy if exists`. Re-applying in dev is safe.
+
+- Existing Phase 5B-2 real-mode session rows backfill cleanly:
+  `status` defaults to `'completed'`, the four other new columns
+  default to NULL, and no application code change is needed for the
+  Phase 5B-2 manual log path to keep working.
+- "Simulated sessions must carry simulation_run_id + seconds_per_hanger"
+  is enforced in application code (Phase 7D), not at the DB level,
+  because Postgres cannot express the conditional cleanly without a
+  trigger.
+- `simulation_activity.simulation_run_id` cascades on delete to match
+  the expected reset semantic — deleting a save wipes its gameplay
+  feed.
+
+### Adapter scaffold behavior
+
+- `DOOR_HANGER_SIMULATION_ADAPTER` is a read-only manifest declaring
+  the plugin key (`door_hanger`), version (matches the existing
+  `DOOR_HANGER_PLUGIN.version`), the five Phase 7 action keys, the
+  seven Phase 7 activity types, default seconds-per-hanger (30), and
+  the parse range `[1, 600]`.
+- No gameplay handlers are exported. Phase 7D wires the actual
+  server actions; Phase 7C consumes the manifest to render the
+  "available actions" card.
+- `computeEffectiveHangCount` returns the smallest of `(requested,
+  remainingInventory, remainingTargets)` with a `cappedBy` reason
+  string (`REQUEST` / `INVENTORY` / `STOPS` / `ZERO`) so the play
+  page can surface specific friendly errors.
+- `computeTimeAdvanceSeconds` is `effectiveN * secondsPerHanger` with
+  fail-safe defaults: non-finite `secondsPerHanger` falls back to
+  `DOOR_HANGER_DEFAULT_SECONDS_PER_HANGER`; `secondsPerHanger < 1`
+  clamps to 1; negative `effectiveCount` clamps to 0.
+- `isRouteComplete` covers both branches of §6: when route stops
+  exist, completion means zero remaining; without stops, completion
+  means `hangersDistributedSoFar >= targetCount` (and is never
+  complete when `targetCount` is null).
+- Activity summary formatters are deterministic strings that match
+  §10.2 — Phase 7D writes these into `simulation_activity.summary`.
+
+### simulation_activity helper behavior
+
+- `appendSimulationActivity` validates required fields (businessId,
+  simulationRunId, actionType, summary, valid `simulatedAt`
+  timestamp) before the DB round-trip, then inserts via service-role
+  and returns a structured `{ ok: true, data: { activityId } }` /
+  `{ ok: false, error }` result. Never throws.
+- `listSimulationActivityForRun` reads newest-first by `created_at`,
+  scoped to `(business_id, simulation_run_id)`, default limit 50,
+  hard-capped at 200. Returns `[]` on any error (read failures are
+  not surfaced to the play page — the feed is best-effort).
+- Neither helper writes to `events`, `activities`, `tasks`,
+  `notifications`, `notification_logs`, or any other core CRM table.
+  The only DB target is `simulation_activity`.
+
+### Tests added
+
+- `src/plugins/door-hanger/simulation/adapter.test.ts` — 26+ pure
+  unit tests covering: default + range constants, `parseSecondsPerHanger`
+  happy + EMPTY + NOT_A_NUMBER + NOT_AN_INTEGER + OUT_OF_RANGE,
+  pinned action-key + activity-type taxonomies, type guards, manifest
+  shape, `computeEffectiveHangCount` (uncapped / inventory-cap /
+  stops-cap / multi-cap / ZERO / negative / non-finite / fractional),
+  `computeTimeAdvanceSeconds` (normal / zero / non-finite fallback /
+  clamp / negative), `formatDurationSeconds` (sec / min / hr / hr+min
+  / non-positive), `isRouteComplete` (both branches + edge cases),
+  activity summary formatters (singular / plural / route-name fallback
+  / completion variants).
+
+### What Phase 7B deliberately does NOT do
+
+- No `/admin/simulation/play` route, no play-page UI components.
+- No Start / Hang 1 / Hang custom / Hang route / Finish server
+  actions wired anywhere.
+- No DB writes from any new code path (the helper is exported but
+  not yet called from any action).
+- No edit / delete / archive flows.
+- No CRM table writes; the GHL SMS adapter is not called from any
+  Phase 7B code.
+- No changes to `/q`, `/admin/marketing/door-hangers` manual flows,
+  `/admin/simulation` saves page, or Phase 3 message automations.
+
+### Not applied
+
+The migration is **created but not applied**. The operator runs
+`supabase db push` when ready. The migration is forward-only and
+idempotent — re-applying in dev is safe.
