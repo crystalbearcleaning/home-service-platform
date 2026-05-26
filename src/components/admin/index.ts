@@ -30,6 +30,7 @@ export { AdminIcon, type AdminIconKey } from "./icons";
 export {
   resolveAdminNav,
   isActiveNavItem,
+  resolveActiveNavHref,
   type AdminNavGroup,
   type AdminNavItem,
   type AdminNavGate,

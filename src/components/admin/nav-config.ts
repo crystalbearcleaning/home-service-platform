@@ -81,6 +81,11 @@ const RAW_NAV: AdminNavGroup[] = [
         href: "/admin/simulation",
         icon: "flask",
       },
+      {
+        label: "Play",
+        href: "/admin/simulation/play",
+        icon: "flask",
+      },
     ],
   },
   {
@@ -171,4 +176,29 @@ export function isActiveNavItem(
   if (itemHref === "/admin") return pathname === "/admin";
   if (pathname === itemHref) return true;
   return pathname.startsWith(itemHref + "/");
+}
+
+// Resolves the single best-matching nav item for a pathname across all
+// groups. "Best" = the longest `item.href` that `isActiveNavItem`
+// considers active. This is the rule the sidebar uses to highlight
+// exactly one item — without it, `/admin/simulation/play` would
+// highlight both `/admin/simulation` (prefix match) and
+// `/admin/simulation/play` (exact match).
+//
+// Returns null when no item matches (e.g. unrelated path).
+export function resolveActiveNavHref(
+  groups: ReadonlyArray<AdminNavGroup>,
+  pathname: string | null | undefined,
+): string | null {
+  if (!pathname) return null;
+  let best: string | null = null;
+  for (const group of groups) {
+    for (const item of group.items) {
+      if (!isActiveNavItem(item.href, pathname)) continue;
+      if (best === null || item.href.length > best.length) {
+        best = item.href;
+      }
+    }
+  }
+  return best;
 }

@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/cn";
 import { AdminIcon } from "./icons";
 import {
-  isActiveNavItem,
+  resolveActiveNavHref,
   type AdminNavGroup,
 } from "./nav-config";
 
@@ -22,6 +22,7 @@ type Props = {
 
 export function AdminSidebar({ groups, workspaceName, onNavigate }: Props) {
   const pathname = usePathname();
+  const activeHref = resolveActiveNavHref(groups, pathname);
 
   return (
     <nav
@@ -56,7 +57,7 @@ export function AdminSidebar({ groups, workspaceName, onNavigate }: Props) {
             </div>
             <ul className="space-y-0.5">
               {group.items.map((item) => {
-                const active = isActiveNavItem(item.href, pathname);
+                const active = item.href === activeHref;
                 return (
                   <li key={item.href}>
                     <Link

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isActiveNavItem, resolveAdminNav } from "./nav-config";
+import {
+  isActiveNavItem,
+  resolveActiveNavHref,
+  resolveAdminNav,
+} from "./nav-config";
 
 describe("resolveAdminNav", () => {
   it("includes Staging tools only when the gate is enabled", () => {
@@ -30,11 +34,14 @@ describe("resolveAdminNav", () => {
     ]);
   });
 
-  it("Simulation group contains exactly Saves", () => {
+  it("Simulation group contains Saves + Play (in that order)", () => {
     const groups = resolveAdminNav({ stagingToolsEnabled: false });
     const sim = groups.find((g) => g.label === "Simulation");
     expect(sim).toBeDefined();
-    expect(sim?.items.map((i) => i.href)).toEqual(["/admin/simulation"]);
+    expect(sim?.items.map((i) => i.href)).toEqual([
+      "/admin/simulation",
+      "/admin/simulation/play",
+    ]);
   });
 
   it("Marketing group contains exactly Door Hangers", () => {
@@ -141,5 +148,51 @@ describe("isActiveNavItem", () => {
   it("returns false when pathname is null / undefined", () => {
     expect(isActiveNavItem("/admin/contacts", null)).toBe(false);
     expect(isActiveNavItem("/admin/contacts", undefined)).toBe(false);
+  });
+});
+
+describe("resolveActiveNavHref", () => {
+  const groups = resolveAdminNav({ stagingToolsEnabled: true });
+
+  it("picks the longest matching href when multiple items share a prefix", () => {
+    // The bug fix: /admin/simulation/play must NOT highlight Saves.
+    expect(resolveActiveNavHref(groups, "/admin/simulation/play")).toBe(
+      "/admin/simulation/play",
+    );
+  });
+
+  it("falls back to the parent on the parent path itself", () => {
+    expect(resolveActiveNavHref(groups, "/admin/simulation")).toBe(
+      "/admin/simulation",
+    );
+  });
+
+  it("matches the dashboard only on exact /admin", () => {
+    expect(resolveActiveNavHref(groups, "/admin")).toBe("/admin");
+    expect(resolveActiveNavHref(groups, "/admin/contacts")).toBe(
+      "/admin/contacts",
+    );
+  });
+
+  it("highlights Contacts on a nested contact-detail path", () => {
+    expect(
+      resolveActiveNavHref(groups, "/admin/contacts/abc-123-uuid"),
+    ).toBe("/admin/contacts");
+  });
+
+  it("highlights Quotes on a nested quote-detail path", () => {
+    expect(resolveActiveNavHref(groups, "/admin/quotes/xyz-456")).toBe(
+      "/admin/quotes",
+    );
+  });
+
+  it("returns null for unrelated paths", () => {
+    expect(resolveActiveNavHref(groups, "/login")).toBeNull();
+    expect(resolveActiveNavHref(groups, "/q")).toBeNull();
+  });
+
+  it("returns null when pathname is null / undefined", () => {
+    expect(resolveActiveNavHref(groups, null)).toBeNull();
+    expect(resolveActiveNavHref(groups, undefined)).toBeNull();
   });
 });

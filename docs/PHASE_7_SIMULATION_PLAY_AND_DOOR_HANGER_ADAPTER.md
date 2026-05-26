@@ -838,3 +838,111 @@ policy if exists`. Re-applying in dev is safe.
 The migration is **created but not applied**. The operator runs
 `supabase db push` when ready. The migration is forward-only and
 idempotent — re-applying in dev is safe.
+
+---
+
+## Appendix B — Phase 7C `/admin/simulation/play` read-only shell (delivered)
+
+**Status:** play page route + Simulation nav entry + read-only shell
+shipped. **No gameplay actions, no DB writes from this page.**
+**Added:** 2026-05-27.
+
+Phase 7C delivers §§2 + 3 of the Phase 7 doc: a real
+`/admin/simulation/play` route with three rendered states (real
+workspace empty / no active save empty / play shell), a Door Hanger
+available-actions card with disabled "Coming next" buttons, a
+read-only current-session card, and the persistent
+`simulation_activity` feed (Phase 7B helper) plumbed into the page.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/components/admin/nav-config.ts` | Added **Play** → `/admin/simulation/play` to the existing Simulation group (Saves stays first; Play sits second). |
+| `src/components/admin/nav-config.test.ts` | Updated to pin the new Simulation group order. |
+| `src/core/simulation/play-page-gate.ts` | Pure decision helpers: `resolvePlayPageGate` (real / no-save / play) and `computeSessionProgress` (uses route stops when present, target count otherwise). |
+| `src/core/simulation/play-page-gate.test.ts` | 13 pure unit tests pinning gate decisions + progress edge cases (zero total, overflow, negative / NaN inputs, no-stops + no-target → null). |
+| `src/core/simulation/play-page-data.ts` | Server-only read helpers: `getActiveDoorHangerSimulationSession` (returns the single active simulated session for a save with joined route / campaign / design names + design remaining) and `isDoorHangerPluginEnabled` (resolves `plugin_definitions` then checks `installed_plugins.status = 'enabled'`). |
+| `src/app/admin/simulation/play/page.tsx` | The page itself. Three gate branches; renders inside `AdminShell` with the existing workspace switcher + simulation banner slots; consumes `getActiveSimulationRun` (Phase 6C), the two new server-only loaders, and `listSimulationActivityForRun` (Phase 7B). |
+
+### Page behavior (gate)
+
+The gate runs after auth + active-business resolution:
+
+- **Active workspace is real (`isSimulation === false`)** — renders
+  the page header + a single `SectionCard` with an `EmptyState`
+  titled "This is not a simulation workspace" and instructions to
+  use the topbar switcher. Door Hanger / session / activity loaders
+  are **not** called.
+- **Simulation workspace, no active save** — same shell, with
+  "Create or select a simulation save first" and a Link → `/admin/simulation`.
+  Loaders are still not called.
+- **Simulation workspace + active save** — the full play shell
+  renders (header → available plugin actions → current Door Hanger
+  work → recent simulation activity).
+
+### Play shell sections
+
+1. **Active save card** — name, status badge, workspace name,
+   simulated current time, current cash, simulated start. Data
+   sourced from `getActiveSimulationRun` (Phase 6C).
+2. **Available plugin actions** — one Door Hanger card when the
+   plugin is enabled on the active workspace; otherwise an
+   `EmptyState`. The Door Hanger card renders four disabled buttons
+   (Start simulated route / Hang 1 / Hang custom / Hang route) with
+   `aria-disabled` + a "Coming next" pill + a footnote stating
+   gameplay lands in Phase 7D. Hang buttons stay disabled regardless
+   of active-session state; Start is the only one that *would*
+   activate first in Phase 7D, but Phase 7C keeps all four disabled.
+3. **Current Door Hanger work in progress** — read-only. When an
+   active simulated session exists for the save, shows route name,
+   campaign name, design name, design remaining, session status,
+   hangers distributed, seconds per hanger (with a human-readable
+   per-hanger duration via `formatDurationSeconds`), total route
+   stops, target home count, percent progress, started timestamp,
+   and a thin progress bar driven by `computeSessionProgress`. When
+   no active session exists, shows an `EmptyState`.
+4. **Recent simulation activity** — most recent 50 rows from
+   `listSimulationActivityForRun` (Phase 7B helper). Each row shows
+   the summary, the `plugin_key · action_type` line, and both the
+   `simulated_at` (prefixed "sim") and `created_at` wall-clock
+   stamps. Empty state when none.
+
+### Strictly read-only
+
+- The page calls no server actions and no `*_create` helpers. The
+  only DB calls are `getActiveSimulationRun`, `isDoorHangerPluginEnabled`,
+  `getActiveDoorHangerSimulationSession`, and
+  `listSimulationActivityForRun` — every one is read-only.
+- No CRM table writes occur from any new code path. No
+  `notification_logs`, `events`, `activities`, `contacts`, `leads`,
+  `quotes`, `tasks`, or `notes` rows are written.
+- The persistent Simulation Mode banner (Phase 6D) still renders
+  above the play page chrome via the existing
+  `renderSimulationBanner` slot — no banner duplication.
+
+### Tests
+
+- `src/core/simulation/play-page-gate.test.ts` — 13 pure unit tests
+  covering the three gate outcomes + edge cases (empty / undefined
+  active id, real-workspace-wins-over-active-id) and
+  `computeSessionProgress` (route-stops vs. target-count branch,
+  no-data null, zero total, overflow cap, negative / NaN inputs).
+- `src/components/admin/nav-config.test.ts` — existing "Simulation
+  group" test updated to require both `/admin/simulation` and
+  `/admin/simulation/play`.
+
+### What Phase 7C deliberately does NOT do
+
+- No Start simulated route action — the Phase 7D server action
+  doesn't exist yet.
+- No Hang 1 / Hang custom / Hang route mutations.
+- No inventory decrements, no simulated-time advances, no
+  simulation_activity inserts from clicking anything on this page
+  (buttons are HTML-disabled).
+- No CRM outcomes, no message-automation calls.
+- No edit / delete / archive on simulation_runs, sessions, routes,
+  designs, campaigns, or simulation_activity.
+- No maps / GPS / pin / drawing UI.
+- No route cooldown filtering.
+- No new schema, no migration.
