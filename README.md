@@ -129,6 +129,41 @@ designs / campaigns / simulation_activity, no multi-active sessions,
 and no change to the public `/q` flow. See §§12 + 14 of the Phase 7
 doc before extending scope.
 
+Phase 7 is **complete** — see `docs/PHASE_7_QA_REPORT.md` for the
+sign-off.
+
+Phase 8 is the **Door Hanger Route Map + Cooldown Foundation**
+phase. It turns saved Door Hanger routes into a real map-first
+route workspace at `/admin/marketing/door-hangers/routes`
+(alongside the existing dashboard, not replacing it): Google Maps
+base layer, RentCast routes drawn as convex-hull polygons over
+their stops, manual routes as circles when a center + radius
+exists, a route details overlay (route name, campaign, source,
+status, stop counts, cooldown counts, last completed, next
+eligible) opened by clicking a polygon, a routes table overlay
+with a "Focus on map" action, optional reuse of the Phase 5C
+RentCast generator as a "Generate" overlay (only if it extracts
+cleanly), and a new route-level `cooldown_days` column
+(default 60) feeding cooldown calculations against `now()` in
+real workspaces or active save's `simulated_current_at` in
+simulation workspaces. Phase 8A is **docs only**. The
+source-of-truth design doc is:
+
+- `docs/PHASE_8_DOOR_HANGER_ROUTE_MAP_AND_COOLDOWN.md`
+
+Phase 8 stays narrow: no GPS tracking, no live worker app, no
+route optimization, no turn-by-turn routing, no manual polygon
+drawing or editing, no lasso / bulk completion, no manual pin
+completion, no cooldown filtering / exclusion inside route
+generation (display only in Phase 8), no cross-route property
+dedupe, no CRM lead / job / outcome generation from door hangers,
+no simulation outcomes, no message-automation outcomes, no jobs /
+invoices / scheduling, no full game economy, no plugin builder /
+marketplace, no data import / export, no AI / context-engine
+expansion, no public `/q` changes, no edit / delete / archive
+flows, and no new simulation actions. See §§14–15 of the Phase 8
+doc before extending scope.
+
 ---
 
 ## Tech Stack
