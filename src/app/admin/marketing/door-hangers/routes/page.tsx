@@ -17,11 +17,7 @@ import { loadRouteMapData } from "@/core/door-hanger/route-map-data";
 import { getActiveSimulationRun } from "@/core/simulation/admin-data";
 
 import { SignOutButton } from "../../../sign-out-button";
-import {
-  RouteMap,
-  type RouteMapRouteDTO,
-  type SelectedRouteSummary,
-} from "./route-map";
+import { RouteMap, type MapRouteFull } from "./route-map";
 
 export const dynamic = "force-dynamic";
 
@@ -63,31 +59,42 @@ export default async function DoorHangerRoutesMapPage() {
   );
   const tableOnlyRouteCount = data.routes.length - routesWithGeometry.length;
 
-  const mapRoutes: RouteMapRouteDTO[] = routesWithGeometry.map((r) => ({
+  // Pass ALL routes to the client — even table-only ones — so the
+  // routes table overlay can list them too. The map skips drawing for
+  // shape.kind === "none".
+  const mapRoutes: MapRouteFull[] = data.routes.map((r) => ({
     id: r.id,
     name: r.name,
+    campaignName: r.campaignName,
+    generatedFromSource: r.generatedFromSource,
+    status: r.status,
+    totalRouteStops: r.totalRouteStops,
+    cooldownDays: r.cooldownDays,
+    lastCompletedAt: r.lastCompletedAt,
+    centerAddress: r.centerAddress,
+    radiusMiles: r.radiusMiles,
+    estimatedTimeSeconds: r.estimatedTimeSeconds,
     shape: r.shape,
+    cooldownSummary: r.cooldownSummary,
+    stops: r.stops.map((s) => ({
+      id: s.id,
+      address: s.address,
+      lat: s.lat,
+      lng: s.lng,
+      status: s.status,
+      completedAt: s.completedAt,
+      cooldown: s.cooldown,
+    })),
+    latestSession: r.latestSession
+      ? {
+          id: r.latestSession.id,
+          distributedAt: r.latestSession.distributedAt,
+          hangersDistributed: r.latestSession.hangersDistributed,
+          status: r.latestSession.status,
+          mode: r.latestSession.mode,
+        }
+      : null,
   }));
-
-  const summariesById: Record<string, SelectedRouteSummary> = {};
-  for (const r of routesWithGeometry) {
-    summariesById[r.id] = {
-      id: r.id,
-      name: r.name,
-      campaignName: r.campaignName,
-      generatedFromSource: r.generatedFromSource,
-      status: r.status,
-      totalRouteStops: r.totalRouteStops,
-      cooldownDays: r.cooldownDays,
-      pendingCount: r.cooldownSummary.pendingCount,
-      completedCount: r.cooldownSummary.completedCount,
-      skippedCount: r.cooldownSummary.skippedCount,
-      coolingDownCount: r.cooldownSummary.coolingDownCount,
-      eligibleCount: r.cooldownSummary.eligibleCount,
-      lastCompletedAt: r.lastCompletedAt,
-      routeNextEligibleAt: r.cooldownSummary.routeNextEligibleAt,
-    };
-  }
 
   return (
     <AdminShell
@@ -140,10 +147,7 @@ export default async function DoorHangerRoutesMapPage() {
         </SectionCard>
       ) : (
         <div className="h-[70vh] min-h-[480px] w-full">
-          <RouteMap
-            routes={mapRoutes}
-            routeSummariesById={summariesById}
-          />
+          <RouteMap routes={mapRoutes} />
         </div>
       )}
 

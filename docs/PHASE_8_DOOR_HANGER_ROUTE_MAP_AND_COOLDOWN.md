@@ -833,6 +833,131 @@ flow was touched.
 
 ---
 
+## Appendix C — Phase 8D overlays + selected-route pins (delivered)
+
+**Status:** route details overlay, routes table overlay, selected-
+route stop pins (status + cooldown tinted), shape emphasis, and a
+focus-on-map control all ship. **No Generate Route overlay yet, no
+GPS / lasso / manual completion / route optimization / outcomes.**
+**No schema changes.**
+**Added:** 2026-06-02.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/core/door-hanger/route-map-display.ts` | Pure presentation helpers: `pinStatusForStop`, `STOP_PIN_COLORS`, `routeCooldownHeadline`, `formatRouteCountsLine`, `selectedRouteFromList`. |
+| `src/core/door-hanger/route-map-display.test.ts` | 17 unit tests covering every pin-status branch, all three headline kinds, the counts line (singular / plural / skipped omission), and selection lookup. |
+| `src/app/admin/marketing/door-hangers/routes/routes-table.tsx` | New client overlay. Floating right-anchored panel listing every saved route with the compact counts line, the cooldown headline (tinted), last-completed / next-eligible dates, cooldown days, and a per-row "Focus on map" button. Disabled for table-only routes. |
+| `src/app/admin/marketing/door-hangers/routes/route-map.tsx` | Replaces the placeholder selected-route panel with the full `<RouteDetailsOverlay>` (route name, campaign, source, status, total stops, all five cooldown counts, last completed, next eligible, cooldown days, estimated time, center address + radius, latest session). Adds selected-route stop pins tinted via `pinStatusForStop` + `STOP_PIN_COLORS`. Selected route shape gets a heavier stroke + deeper fill. Adds the floating "Routes (N)" button + `<RoutesTableOverlay>` wiring. Adds a small `<MapLegend>` in the bottom-right. Introduces a `focusToken` counter so Focus-on-map refits bounds to one route without yanking the camera on every selection change. |
+| `src/app/admin/marketing/door-hangers/routes/page.tsx` | Now forwards the **full** `MapRouteFull` DTO (route metadata + cooldown summary + per-stop with status + cooldown + latestSession). Table-only routes are forwarded too so the table overlay can list them. |
+
+### Route details overlay behavior
+
+- Opens on shape click **or** via the table's Focus action.
+- Headline line shows one of three states (color-coded):
+  - "Not walked yet" — grey, when no completed stops.
+  - "Eligible" — success-tone, when every completed stop is past
+    its cooldown.
+  - "Cooling down until {date}" — warning-tone, when at least one
+    completed stop is still in the cooldown window. The date is
+    the earliest `next_eligible_at` across cooling stops.
+- Two-column KV grid: source / status / total stops / cooldown
+  days / pending / completed / skipped / cooling / eligible / last
+  completed / next eligible / estimated time.
+- Conditional sub-cards: center address + radius (when present),
+  latest distribution session (one summary row with date + hangers
+  + mode + status).
+- Close button returns to "no selection" — the shape unhighlights,
+  pins disappear, overlay dismisses.
+- Read-only — no edit / delete / archive / force-complete /
+  manual-completion controls.
+
+### Routes table overlay behavior
+
+- Floating button top-right: "Routes (N)" / "Hide routes" toggles
+  the panel.
+- Right-anchored, max-height scrollable, dismissible Close button.
+- Each row: route name + source + status + (optional) campaign
+  name, the headline cooldown line (tinted), the compact counts
+  line ("100 stops · 26 done · 74 pending · 0 cooling · 26
+  eligible · cooldown 60d"), last completed / next eligible dates,
+  and a per-row **Focus on map** button. Table-only routes show
+  the warning footnote and disable Focus.
+- Focus on map → selects route, closes the table, opens the
+  details overlay, and bumps the focus token so the map fits
+  bounds to that route's shape.
+- Read-only: no filters, no saved views, no multi-select, no
+  edit/delete/archive.
+
+### Selected route pins behavior
+
+- When a route is selected, every stop with `lat`/`lng` renders as
+  a `google.maps.Marker` using `SymbolPath.CIRCLE` (6 px scale,
+  90 % fill opacity).
+- Pin tint per `pinStatusForStop`:
+  - `pending` → blue (`#3b82f6`)
+  - `completed_cooling` → amber (`#f59e0b`)
+  - `completed_eligible` → green (`#10b981`)
+  - `skipped` → grey (`#9ca3af`)
+- Pin `title` exposes a native browser tooltip with address +
+  status + (when present) completed date + next eligible date.
+  Per §7 of the doc, the cheap title tooltip is the Phase 8D
+  surface; no rich pin card.
+- Pins for non-selected routes are **not** rendered — the map
+  stays uncluttered.
+- A small `<MapLegend>` in the bottom-right pins the four colors
+  to their labels.
+
+### Map focus / selection behavior
+
+- Selected polygon: heavier stroke (4 px), deeper fill (32 %
+  opacity), `zIndex` 5 so it sits on top of other shapes.
+- Selected line: 5 px stroke.
+- Initial render auto-fits bounds across all shapes (only when
+  no selection + no prior focus).
+- Focus on map (from the table) bumps a `focusToken`; an effect
+  refits bounds to that route's shape. Selecting via shape click
+  does **not** refit (the user already sees it).
+- Closing the details overlay clears the selection; the
+  pins unmount and the polygon returns to default styling.
+
+### Cooldown display
+
+- Real workspace → `now()`.
+- Simulation workspace + active save → save's
+  `simulated_current_at` (existing Phase 8C status pill in the
+  page header surfaces "Cooldown: simulated clock").
+- Simulation workspace + no active save → wall-clock fallback
+  (existing Phase 8C warning pill).
+- The cooldown headline + counts in the details overlay + table
+  use the same reference time the page computed.
+
+### Tests
+
+- 17 new pure tests for `route-map-display.ts` (pin status branches
+  including the defensive "completed + not_completed → eligible"
+  case, every headline kind, counts singular/plural/skipped
+  inclusion, selection lookup edge cases).
+- All 4 existing Phase 8C route-map helper tests continue to pass.
+- All 40 Phase 8B helper tests continue to pass.
+
+### What Phase 8D deliberately does NOT do
+
+- No Generate Route overlay (Phase 8E, optional).
+- No GPS / live worker / route optimization / turn-by-turn.
+- No manual polygon drawing or editing.
+- No lasso / bulk completion.
+- No manual pin completion (clicking a pin shows tooltip only).
+- No cooldown filtering inside RentCast route generation.
+- No CRM / simulation outcomes, no message-engine calls.
+- No edit / delete / archive on routes, route stops, designs,
+  campaigns, or distribution sessions.
+- No public `/q` changes.
+- No schema changes.
+
+---
+
 ## 17. Phase 8A Definition of Done
 
 - [x] Source-of-truth doc exists (this file).
