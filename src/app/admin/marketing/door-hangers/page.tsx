@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
@@ -79,6 +80,28 @@ export default async function DoorHangersDashboardPage() {
       />
 
       <SectionCard
+        title="Route map"
+        description="See saved routes geographically, click for stats, and inspect cooldown status."
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs text-ink-muted">
+              {routes.length === 0
+                ? "Once you create a manual route or generate one from a center address, it will show up on the map."
+                : `${routes.length} saved route${routes.length === 1 ? "" : "s"} ready to view.`}
+            </p>
+          </div>
+          <Link
+            href="/admin/marketing/door-hangers/routes"
+            className="inline-flex items-center rounded-pill border border-line bg-surface px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-muted"
+          >
+            Open Route Map →
+          </Link>
+        </div>
+      </SectionCard>
+
+      <div className="mt-6">
+      <SectionCard
         title="Campaigns"
         description={
           campaigns.length === 0
@@ -104,6 +127,7 @@ export default async function DoorHangersDashboardPage() {
           <CampaignCreateForm />
         </div>
       </SectionCard>
+      </div>
 
       <div className="mt-6">
         <SectionCard

@@ -716,6 +716,123 @@ If implemented in later Phase 8 sub-phases:
 
 ---
 
+## Appendix A — Phase 8B schema + helpers (delivered)
+
+**Status:** schema applied (`cooldown_days` column + CHECK via a tiny
+follow-up migration). Pure helpers + server-only loader landed with
+40 unit tests.
+**Added:** 2026-06-02.
+
+See `schema.md` §22e for the column-level reference. Two migrations
+were applied:
+`20260602120000_phase_8_door_hanger_cooldown.sql` (column) and
+`20260602120100_phase_8_door_hanger_cooldown_check.sql` (CHECK
+follow-up — the guarded `DO $$` block in the first migration did
+not land the constraint on Supabase, so the second migration added
+it directly under a fresh existence guard).
+
+Files:
+- `src/core/door-hanger/route-map-geometry.ts` — pure
+  `computeConvexHull` (Andrew's monotone chain), `isValidPoint`,
+  `computeRouteShape` (hull → circle → none).
+- `src/core/door-hanger/cooldown.ts` — pure
+  `computeCooldownStatus`, `summarizeRouteCooldown`,
+  `getDoorHangerRouteMapReferenceTime`, default 60.
+- `src/core/door-hanger/route-map-data.ts` — server-only loader
+  `loadRouteMapData({businessId, referenceTime})` returning
+  `{referenceTime, routes[]}` with shape + cooldown summary +
+  per-stop cooldown + latest session per route.
+- 40 unit tests across `route-map-geometry.test.ts`,
+  `route-map-shape.test.ts`, `cooldown.test.ts`.
+
+---
+
+## Appendix B — Phase 8C map workspace shell (delivered)
+
+**Status:** `/admin/marketing/door-hangers/routes` ships with the
+Google Maps base layer, all four shape kinds (polygon / line /
+point / circle), bounds fitting, click-to-select with a placeholder
+route details overlay, and an "Open Route Map →" card on the
+existing dashboard. **No route table overlay yet, no selected-route
+pins, no Generate Route overlay.**
+**Added:** 2026-06-02.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/components/use-google-maps-bootstrap.ts` | Shared client hook that injects Google's inline Maps JS bootstrap loader once per page and reports `{kind: 'pending' \| 'ready' \| 'error'}`. Mirrors the strategy in `google-autocomplete.tsx`; both coexist (Google's loader guards against double-bootstrap). |
+| `src/app/admin/marketing/door-hangers/routes/route-map.tsx` | Client component. Imports the `maps` library on bootstrap-ready, mounts a `google.maps.Map`, rebuilds shape overlays on `routes` changes, fits bounds, and surfaces a placeholder `<SelectedRoutePanel>` on shape click. Pure helper `resolveSelectedRouteId` is unit-tested. |
+| `src/app/admin/marketing/door-hangers/routes/route-map.test.ts` | 4 unit tests for `resolveSelectedRouteId`. |
+| `src/app/admin/marketing/door-hangers/routes/page.tsx` | Server component. Resolves auth + active business + active simulation save, computes the cooldown reference time via `getDoorHangerRouteMapReferenceTime`, loads route map data via `loadRouteMapData`, and renders the page shell (status pills + map area + reference-time footer). |
+| `src/app/admin/marketing/door-hangers/page.tsx` | Adds a "Route map" `<SectionCard>` immediately under the page header with an **Open Route Map →** Link. The existing Campaigns / Inventory / Routes / Recent distribution sessions sections are unchanged. |
+
+### Map / route shape behavior
+
+- **`polygon`** — `google.maps.Polygon`, brand-tone fill, click → `onSelect(route.id)`.
+- **`line`** — `google.maps.Polyline`, brand-tone stroke, clickable.
+- **`point`** — `google.maps.Marker` titled with the route name, clickable.
+- **`circle`** — `google.maps.Circle` centered at `center_lat/lng`, sized as `radiusMiles * 1609.344` meters, clickable.
+- **`none`** — not rendered; counted in the "table-only" status pill instead.
+
+Bounds-fit logic walks every shape's points (polygon vertices, line
+endpoints, point coordinates, circle bbox derived from radius via
+the standard 111,320 m/deg approximation). With at least one bounded
+shape the map calls `fitBounds(..., 48)`; otherwise it falls back to
+the Boynton Beach / Crystal Bear area center (lat 26.5, lng -80.1)
+at zoom 11.
+
+Selected route opens an inline `<SelectedRoutePanel>` overlay (top-left,
+80-rem max, dismissible). The panel shows: route name, campaign name
+(when set), source, status, total stops, cooldown days, pending /
+completed / skipped / cooling-down / eligible counts, last completed,
+next eligible. Phase 8D replaces this placeholder with the full
+overlay.
+
+### Cooldown reference-time wiring
+
+The server page resolves `referenceTime` via Phase 8B's
+`getDoorHangerRouteMapReferenceTime`:
+
+- Real workspace → `real_now`.
+- Simulation workspace + active save → `simulated_clock`
+  (active save's `simulated_current_at`).
+- Simulation workspace + no active save → `fallback_now_no_active_save`
+  (wall-clock, with a warning status pill rendered on the page).
+
+The selected pill in the header strip surfaces the active source so
+the operator can tell at a glance which clock is driving the counts.
+
+### Dashboard card behavior
+
+The existing `/admin/marketing/door-hangers` dashboard now renders a
+"Route map" SectionCard immediately under the page header. The card
+shows either "Once you create a manual route or generate one from a
+center address, it will show up on the map." (when no routes exist)
+or "N saved route(s) ready to view." Both states render the
+**Open Route Map →** Link. No existing dashboard section, form, or
+flow was touched.
+
+### Tests
+
+- `route-map.test.ts` — 4 cases pinning `resolveSelectedRouteId`
+  (null / hit / miss / empty list).
+- All Phase 8B helper tests (40) continue to pass.
+
+### What Phase 8C deliberately does NOT do
+
+- No route table overlay (Phase 8D).
+- No selected-route stop pins (Phase 8D).
+- No Generate Route overlay (Phase 8E, optional).
+- No drawing, lasso, manual pin completion, GPS, route optimization,
+  turn-by-turn, or live worker features.
+- No edit / delete / archive on routes.
+- No cooldown filtering inside RentCast route generation.
+- No CRM / simulation outcome generation, no message-engine calls.
+- No public `/q` changes.
+
+---
+
 ## 17. Phase 8A Definition of Done
 
 - [x] Source-of-truth doc exists (this file).
