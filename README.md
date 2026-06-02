@@ -164,6 +164,47 @@ expansion, no public `/q` changes, no edit / delete / archive
 flows, and no new simulation actions. See §§14–15 of the Phase 8
 doc before extending scope.
 
+Phase 8 is **complete** — see `docs/PHASE_8_QA_REPORT.md` for the
+sign-off.
+
+Phase 9 is the **Jobs + Job Line Items Foundation** phase. It
+shifts back to core CRM and adds the Job — a Jobber-style work
+order — as the next foundational core object: a new `jobs` table
+(contact, optional property, optional source quote, title,
+status enum `draft|unscheduled|scheduled|in_progress|completed|
+canceled`, source `manual|quote`, basic scheduling fields
+`scheduled_start_at / scheduled_end_at / arrival_window_label`,
+snapshot `estimated_total_cents`), a new `job_line_items` child
+table (optional `service_id`, name, description, quantity,
+`unit_price_cents`, `total_cents`, source `quote|service|custom`),
+quote-to-job conversion that snapshots the quote's line items
+into job_line_items (the job is a snapshot, not a live mirror),
+manual job creation with both catalog-backed and custom line
+items, a new **Jobs** entry under the CRM nav group, `/admin/jobs`
+list + `/admin/jobs/[jobId]` detail, status changes via a simple
+select, and "job created" activity rows. Phase 9A is **docs
+only**. The source-of-truth design doc is:
+
+- `docs/PHASE_9_JOBS_AND_JOB_LINE_ITEMS_FOUNDATION.md`
+
+Phase 9 stays narrow: no full scheduling calendar, no crew /
+technician assignment, no recurring visits, no visits /
+appointments table, no technician mobile app, no on-the-way /
+arrival workflows, no route optimization for jobs, no real-time
+field tracking, no invoices, no invoice line items, no payments /
+deposits / refunds / payment processor integration, no taxes /
+discounts / surcharges, no bundled-package pricing, no customer
+notifications on job creation or status change (real or simulated),
+no message-automation outcomes from job events, no job reminders,
+no quote acceptance / payment portal, no customer accounts or
+customer-facing job views, no public `/q` changes, no simulation-
+driven job generation, no plugin builder / marketplace, no data
+import / export, no AI / context-engine expansion, and no edit /
+delete / archive flows on jobs / job_line_items beyond what Phase
+9D ships (status change, line item add / remove / edit, scheduling
+field edit). See §§18–19 of the Phase 9 doc before extending
+scope.
+
 ---
 
 ## Tech Stack
