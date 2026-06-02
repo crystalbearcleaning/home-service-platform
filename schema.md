@@ -1211,6 +1211,7 @@ save in the `/admin/simulation` UI.
 
 ---
 
+
 ## 22d. Simulation Play (Phase 7B)
 
 Phase 7B is **additive**. It does not create new core CRM tables and
@@ -1287,6 +1288,31 @@ playing the simulation in Phase 7D+. No gameplay UI exists yet at the
 close of Phase 7B; the table sits ready for Phase 7C/7D to write
 into.
 
+## 22e. Door Hanger route cooldown (Phase 8B)
+
+Phase 8B is additive. It adds a single column to `door_hanger_routes`
+to support the Phase 8 map workspace's cooldown display. No other
+table changes; no new RLS policies or grants.
+
+Source of truth:
+`docs/PHASE_8_DOOR_HANGER_ROUTE_MAP_AND_COOLDOWN.md` §11.
+
+### `door_hanger_routes` (additive column)
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `cooldown_days` | `integer` NOT NULL default `60` | CHECK `cooldown_days >= 0` | Per-route retargeting window in days. Combined with `door_hanger_route_stops.completed_at` to compute per-stop `next_eligible_at` (`completed_at + cooldown_days days`). Existing routes back-fill to 60 via the column default. |
+
+**Display-only in Phase 8.** RentCast route generation does **not**
+filter candidates by cooldown — that remains deferred. Cross-route
+property dedupe is also still deferred.
+
+The Phase 8 reference time for cooldown calculations is `now()` in
+real workspaces and the active save's `simulated_current_at` in
+simulation workspaces (see `getDoorHangerRouteMapReferenceTime` in
+`src/core/door-hanger/cooldown.ts`).
+
+---
 ---
 
 ## 23. Deferred Tables
