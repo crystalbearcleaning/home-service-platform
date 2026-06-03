@@ -871,3 +871,118 @@ If implemented in later Phase 9 sub-phases:
 
 Phase 9A ends at docs only. Phase 9B is the first step that touches
 code, and it only ships after this doc is reviewed and approved.
+
+---
+
+## Appendix A — Phase 9B schema + server foundation (delivered)
+
+**Status:** migration + pure helpers + quote-snapshot parser +
+server-only loaders + server-only create / update helpers + 43 pure
+unit tests. **Migration not applied** — operator runs
+`supabase db push` when ready. **No UI shipped in Phase 9B.**
+**Added:** 2026-06-02.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `supabase/migrations/20260603120000_phase_9_jobs.sql` | Creates `jobs` + `job_line_items` tables, indexes, CHECKs (status / source enums + non-negative money), RLS Pattern B (members SELECT). |
+| `src/core/jobs/constants.ts` | Pinned enums + type guards: `JOB_STATUSES`, `JOB_SOURCES`, `JOB_LINE_ITEM_SOURCES`. |
+| `src/core/jobs/totals.ts` | Pure: `computeJobLineItemTotal({quantity, unitPriceCents})`, `computeJobEstimatedTotal(lineItems)`. Defensive clamping (negative / non-finite → 0). |
+| `src/core/jobs/validation.ts` | Pure: `validateJobForm`, `validateJobLineItemForm`, `validateSchedulingFields`. Field-level errors mirror the DB CHECKs. |
+| `src/core/jobs/quote-snapshot.ts` | Pure: `parseQuoteLineItemsSnapshot` (reads the Auto-Quote `line_items_snapshot` shape `{option_key, label, amount, kind}`, dollars → cents at the boundary) + `buildQuoteJobTitle`. Falls back to `selected_total` + option label when the per-item snapshot is missing or unusable. Never throws. |
+| `src/core/jobs/admin-data.ts` | Server-only read helpers: `listJobs`, `getJob`, `getJobLineItems`, `listJobsForQuote`, `listJobsForContact`. Joins contact + property + service name; clamps limit to [1, 500]; returns `[]` on any error. |
+| `src/core/jobs/admin-create.ts` | Server-only write helpers: `createManualJob`, `createJobFromQuote`, `addJobLineItem`, `updateJobLineItem`, `removeJobLineItem`, `updateJobStatus`, `updateJobScheduling`. FK ownership re-verified for contact / property / quote / service before insert. `estimated_total_cents` recomputed via `recomputeJobEstimatedTotal` after every line-item mutation. |
+| `src/core/jobs/totals.test.ts` | 8 tests for total math (normal, fractional, negative clamp, list sum). |
+| `src/core/jobs/validation.test.ts` | 24 tests for enums + form / line-item / scheduling validation. |
+| `src/core/jobs/quote-snapshot.test.ts` | 11 tests for snapshot parser (well-formed array, missing / malformed / empty fallback, partial-skip, garbage tolerance, numeric-string input, title helper). |
+| `schema.md` §22f | Documents `jobs` + `job_line_items`. |
+
+### Migration shape
+
+Two new tables added in one migration. All columns documented in
+schema.md §22f. CHECKs:
+
+- `jobs.title` non-empty
+- `jobs.status` in (`draft`, `unscheduled`, `scheduled`, `in_progress`, `completed`, `canceled`)
+- `jobs.source` in (`manual`, `quote`)
+- `jobs.estimated_total_cents >= 0`
+- `jobs.scheduled_end_at >= scheduled_start_at` when both present
+- `job_line_items.name` non-empty
+- `job_line_items.quantity > 0`
+- `job_line_items.unit_price_cents >= 0`
+- `job_line_items.total_cents >= 0`
+- `job_line_items.source` in (`quote`, `service`, `custom`)
+
+Six indexes on `jobs` (`business_id`, `(business_id, status)`,
+`(business_id, created_at desc)`, `(business_id, scheduled_start_at)`,
+`contact_id`, `quote_id`) and three on `job_line_items`
+(`business_id`, `(business_id, job_id)`, `(job_id, sort_order asc
+nulls last, created_at asc)`).
+
+### Helper behavior
+
+- **Validation.** Manual creation defaults to `status='draft'` +
+  `source='manual'`. Quote creation pins `status='unscheduled'` +
+  `source='quote'`. Scheduling end ≥ start enforced both in the
+  pure helper and the DB CHECK.
+- **Totals.** `computeJobLineItemTotal` rounds `quantity *
+  unit_price_cents` to the nearest cent. `computeJobEstimatedTotal`
+  sums + ignores invalid rows. `estimated_total_cents` on the
+  parent job row is always app-recomputed from the actual inserted
+  line items (no double-counting on add / update / remove).
+
+### Quote parser behavior
+
+- Reads `quotes.line_items_snapshot` as an array of
+  `{option_key, label, amount, kind}` (the shape the Phase 1
+  Auto-Quote Plugin writes).
+- `amount` is treated as dollars and converted to cents via
+  `Math.round(amount * 100)`.
+- Each parsed row becomes a `source='quote'` line item with
+  `serviceId=null` (no reliable service id in the snapshot —
+  honours the FK ON DELETE SET NULL contract).
+- Falls back to **one** line item built from `selected_total` +
+  the option label found in `options_snapshot` when the per-item
+  snapshot is absent or every row is unusable.
+- Returns `{lineItems, warnings, source: 'line_items_snapshot' |
+  'selected_total_fallback' | 'empty'}`. Never throws.
+- `buildQuoteJobTitle` prefers the option's `display_label`, then
+  `"{contact} — Job"`, then the literal `"Quoted work"`.
+
+### Server loader / writer behavior
+
+- **Loaders** are service-role + business-scoped + read-only.
+  Joins pull `contact.full_name`, `property.address_line_*`, and
+  `service.name` for list / detail rendering.
+- **Writers** are service-role + business-scoped. Every helper
+  validates inputs via the pure validators, then re-verifies FK
+  ownership before any insert / update. Atomicity follows the
+  Phase 5B / 7D-1 / 8B pattern: ordered writes plus a recompute
+  step for `jobs.estimated_total_cents` (no Postgres RPC introduced
+  in Phase 9B).
+- `createJobFromQuote` always writes a job, even when the parser
+  emits zero line items (`source='empty'`). Operator can fix the
+  job after the fact; the `warnings[]` surface explains what
+  happened on the Phase 9E UI.
+
+### What Phase 9B deliberately does NOT do
+
+- No UI — no `/admin/jobs` page, no nav entry, no server actions
+  wired to forms.
+- No `activities` / `events` / `notes` writes (deferred to Phase 9F).
+- No message-engine calls; no customer notifications.
+- No invoice / payment / visits / appointments / calendar tables.
+- No edit / delete / archive flows beyond the documented status
+  change, line item CRUD, and scheduling update helpers.
+- No Postgres RPC. Ordered writes + recompute matches existing
+  Phase 5B + 7D-1 + 8 patterns.
+- No simulation-driven job generation.
+- No public `/q` change.
+
+### Not applied
+
+The migration is **created but not applied**. Operator runs
+`supabase db push` when ready. Re-applying is safe in dev
+(`create table` matches the Phase 1 / 5 / 7B convention; CREATE
+POLICY is preceded by DROP POLICY IF EXISTS).

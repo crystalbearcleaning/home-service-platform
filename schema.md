@@ -1313,6 +1313,100 @@ simulation workspaces (see `getDoorHangerRouteMapReferenceTime` in
 `src/core/door-hanger/cooldown.ts`).
 
 ---
+
+## 22f. Jobs + Job Line Items (Phase 9B)
+
+Phase 9B introduces the core **Job** object — a Jobber-style work
+order — and per-job line items. Two new tables, both `business_id`-
+scoped with RLS Pattern B. No invoices, payments, visits, or
+scheduling-calendar tables in Phase 9.
+
+Source of truth:
+`docs/PHASE_9_JOBS_AND_JOB_LINE_ITEMS_FOUNDATION.md` §§14, 18.
+
+### `jobs`
+
+One row per work order. Created from a quote (snapshot) or
+manually from a contact + property.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `uuid` | PK, default `gen_random_uuid()` | |
+| `business_id` | `uuid` | NOT NULL, FK → `businesses(id)` ON DELETE CASCADE | Scope + RLS. |
+| `contact_id` | `uuid` | NOT NULL, FK → `contacts(id)` ON DELETE CASCADE | A job without a customer is meaningless. |
+| `property_id` | `uuid` | NULLABLE, FK → `properties(id)` ON DELETE SET NULL | Indoor add-ons / future product sales may not bind to a property. |
+| `quote_id` | `uuid` | NULLABLE, FK → `quotes(id)` ON DELETE SET NULL | Set on quote → job conversion. Not unique; a quote may seed multiple jobs over time. |
+| `title` | `text` | NOT NULL, CHECK `length(btrim(title)) > 0` | Required. |
+| `summary` | `text` | NULLABLE | Optional longer description. |
+| `status` | `text` | NOT NULL default `'draft'`, CHECK in (`draft`, `unscheduled`, `scheduled`, `in_progress`, `completed`, `canceled`) | Plain text enum; no guarded state machine in Phase 9. |
+| `source` | `text` | NOT NULL default `'manual'`, CHECK in (`manual`, `quote`) | Drives "Created from quote" display. |
+| `scheduled_start_at` | `timestamptz` | NULLABLE | Phase 9 stores a simple timestamp; no calendar UI yet. |
+| `scheduled_end_at` | `timestamptz` | NULLABLE, CHECK `end >= start` when both present | |
+| `arrival_window_label` | `text` | NULLABLE | Free-form ("8–10 AM"). |
+| `estimated_total_cents` | `bigint` | NOT NULL default `0`, CHECK ≥ 0 | App-maintained snapshot recomputed from `job_line_items` after every line-item mutation. |
+| `created_at` / `updated_at` | `timestamptz` | standard | |
+
+**Indexes:**
+- `(business_id)`
+- `(business_id, status)`
+- `(business_id, created_at desc)`
+- `(business_id, scheduled_start_at)`
+- `(contact_id)` — contact-hub jobs list (Phase 9C)
+- `(quote_id)` — jumping from a quote to its jobs
+
+**RLS:** Pattern B. Authenticated members may `SELECT`; INSERT /
+UPDATE / DELETE go through the Phase 9B server helpers
+(`src/core/jobs/admin-create.ts`) using the service-role client.
+
+### `job_line_items`
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `uuid` | PK, default `gen_random_uuid()` | |
+| `business_id` | `uuid` | NOT NULL, FK → `businesses(id)` ON DELETE CASCADE | |
+| `job_id` | `uuid` | NOT NULL, FK → `jobs(id)` ON DELETE CASCADE | |
+| `service_id` | `uuid` | NULLABLE, FK → `services(id)` ON DELETE SET NULL | Set when the line came from the service catalog. |
+| `name` | `text` | NOT NULL, CHECK non-empty | Human label. |
+| `description` | `text` | NULLABLE | Optional notes for the line. |
+| `quantity` | `numeric(10,2)` | NOT NULL default `1`, CHECK > 0 | Numeric so half-units / time-based services work later. |
+| `unit_price_cents` | `bigint` | NOT NULL, CHECK ≥ 0 | |
+| `total_cents` | `bigint` | NOT NULL, CHECK ≥ 0 | App-computed `round(quantity * unit_price_cents)`. The DB CHECKs are the safety net; the pure helper `computeJobLineItemTotal` is the source of truth. |
+| `sort_order` | `integer` | NULLABLE | Render order. NULL = end. |
+| `source` | `text` | NOT NULL, CHECK in (`quote`, `service`, `custom`) | Records how the line originated. |
+| `created_at` / `updated_at` | `timestamptz` | standard | |
+
+**Indexes:**
+- `(business_id)`
+- `(business_id, job_id)`
+- `(job_id, sort_order asc nulls last, created_at asc)` — render order
+
+**RLS:** Pattern B.
+
+### Line items are the source of truth for job totals
+
+`jobs.estimated_total_cents` is a maintained **snapshot** of
+`sum(job_line_items.total_cents)`. Every Phase 9B server helper
+that touches line items (create job, add / update / remove line
+item) calls `recomputeJobEstimatedTotal(businessId, jobId)` in the
+same handler. The DB CHECK `estimated_total_cents >= 0` is the
+safety net. The application code is the source of truth.
+
+### What Phase 9B does NOT add
+
+- No invoice / invoice_line_items table.
+- No payments / payment_methods / refunds tables.
+- No visits / appointments / calendar_events table.
+- No crew / technician / assignment tables.
+- No recurring schedule / agreement tables.
+- No taxes / discounts / deposits columns.
+- No customer notifications / job_reminder rows.
+- No simulation-specific jobs table.
+
+Each belongs to a future foundation phase.
+
+**Phase 9B does NOT seed any rows** — operators create jobs through
+the Phase 9D manual flow and the Phase 9E quote-to-job conversion.
+
 ---
 
 ## 23. Deferred Tables
