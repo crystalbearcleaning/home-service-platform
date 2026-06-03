@@ -1202,3 +1202,186 @@ Phase 10D. **No schema changes.** **Added:** 2026-06-02.
   to other Server-Component-only admin pages; the absolutely-
   positioned grid is pure CSS + Tailwind tokens — no calendar
   library was introduced.
+
+---
+
+## Appendix C — Phase 10D schedule / reschedule / unschedule actions + modal (delivered)
+
+**Status:** the read-only schedule surface is now interactive. The
+unscheduled-card placeholder is replaced with a working **Schedule**
+button that opens a click-to-schedule modal; scheduled cards expose
+**Reschedule** + **Unschedule** controls; a same-business overlap
+pre-check surfaces a yellow warning the operator can confirm
+anyway. **No drag/drop, no crew assignment, no external calendar
+sync, no customer notifications, no schema changes.**
+**Added:** 2026-06-02.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/core/jobs/admin-data.ts` | **Added** `listScheduleOverlapCandidates({ businessId, fromIso, toIso, limit? })` — server-only, business-scoped, status ∈ [`scheduled`, `in_progress`], `scheduled_start_at` in `[fromIso, toIso]`. |
+| `src/app/admin/schedule/parse-schedule-form.ts` | Pure `parseScheduleFormFields({ date, startTime, endTime?, arrivalWindowLabel? })` returning `{ ok, startIso, endIso, arrivalWindowLabel }` or `{ ok: false, fieldErrors }`. End defaults to start + 60 min via `defaultEndForStart`. Trims + clamps arrival window to 120 chars. |
+| `src/app/admin/schedule/parse-schedule-form.test.ts` | 8 pure tests (valid round-trip, default-end fallback, required date/start, end-before-start, invalid time, overflow date, arrival trim + clamp, blank arrival → null). |
+| `src/app/admin/schedule/modal-helpers.ts` | Pure: `extractDateFromIso`, `extractTimeFromIso`, `computeScheduleDefaults`, `isJobSchedulableStatus`, `isJobReschedulableStatus`, `isJobUnschedulableStatus`. |
+| `src/app/admin/schedule/modal-helpers.test.ts` | 9 pure tests pinning the extractors, default helper (fallback / pre-fill / missing-end), and the three eligibility helpers across all 6 statuses. |
+| `src/app/admin/schedule/actions.ts` | Three server actions: `scheduleJobAction`, `rescheduleJobAction`, `unscheduleJobAction`. Each: `requireBusiness` → status-eligibility guard (draft/unscheduled for schedule; scheduled for reschedule + unschedule) → overlap pre-check (warning only) → compose Phase 9B `updateJobScheduling` + `updateJobStatus` → soft-fail `createActivity`. Single `ScheduleActionResult` discriminated union; the `OVERLAP_WARNING` error variant carries `conflicts[]`. |
+| `src/app/admin/schedule/schedule-job-modal.tsx` | Client modal. Shared by schedule + reschedule modes. Native `<input type="date">` + `<input type="time">`. Yellow conflict banner with per-conflict link; **Confirm anyway** button re-submits with `confirmOverlap: true`. Click outside / Cancel closes. `router.refresh()` on success. |
+| `src/app/admin/schedule/card-actions.tsx` | Client buttons that own per-card modal state: `<ScheduleAction />` (unscheduled cards), `<RescheduleAction />` + `<UnscheduleAction />` (scheduled cards). Unschedule uses `window.confirm`. All three honor the eligibility helpers. |
+| `src/app/admin/schedule/schedule-views.tsx` | Rewires `ScheduledJobCard`, `OutsideHoursList`, and `UnscheduledJobsPanel` to slot in the new client actions. Wrapping `<Link>` on the calendar card replaced with `div` + title link + action row (Reschedule + Unschedule rendered only when `status === 'scheduled'`). |
+| `src/app/admin/schedule/page.tsx` | Computes `fallbackScheduleDate` (today's local date when visible week = today's week, otherwise visible Monday) and passes it to the three view components. Header copy updated. |
+
+### Action behavior
+
+- **`scheduleJobAction({ jobId, date, startTime, endTime?, arrivalWindowLabel?, confirmOverlap? })`**
+  - Validates input via `parseScheduleFormFields`.
+  - Confirms the job belongs to the active business + status ∈
+    [`draft`, `unscheduled`].
+  - Runs `runOverlapCheck` (loads same-business candidates in a
+    ±48-hour window around the proposed range, then
+    `detectScheduleOverlaps` does the precise half-open math
+    excluding the current job).
+  - If overlaps + `!confirmOverlap` → returns
+    `{ ok: false, error: { code: "OVERLAP_WARNING", conflicts: [...] } }`.
+    Job is unchanged.
+  - Otherwise → `updateJobScheduling` → `updateJobStatus('scheduled')` →
+    soft-fail `createActivity` with type `job.scheduled` carrying
+    `scheduled_start_at`, `scheduled_end_at`, `arrival_window_label`,
+    `conflict_count`, `confirmed_overlap`. Revalidates
+    `/admin/schedule`, `/admin/jobs`, `/admin/jobs/[jobId]`.
+- **`rescheduleJobAction(...)`** — identical guard + overlap logic,
+  but status must be `scheduled` and stays `scheduled`. Activity
+  type `job.rescheduled`; details include a `previous` snapshot of
+  the old scheduling fields.
+- **`unscheduleJobAction({ jobId })`** — status must be `scheduled`.
+  Clears all three scheduling fields (`scheduled_start_at`,
+  `scheduled_end_at`, `arrival_window_label`) and flips status to
+  `unscheduled`. Activity type `job.unscheduled` with `previous`
+  snapshot. No overlap check (irrelevant on the unschedule path).
+
+### Modal / UI behavior
+
+- **Schedule mode** opens from the **Schedule** button on
+  unscheduled cards. Defaults: `date = fallbackScheduleDate`,
+  `startTime = 09:00`, `endTime = 10:00`, arrival blank.
+- **Reschedule mode** opens from the **Reschedule** button on
+  scheduled cards. Pre-fills from existing scheduling fields via
+  `computeScheduleDefaults`.
+- Conflict banner lists each conflicting job (title → opens detail
+  in a new tab) with its local-time range. The primary button flips
+  from **Schedule / Save** → **Confirm anyway** while conflicts are
+  showing. Editing any field clears the banner so the next submit
+  re-runs the check.
+- Modal is a simple fixed-overlay div (no portal, no calendar
+  library). Click on the backdrop closes. Cancel button closes.
+- **Unschedule** uses `window.confirm` (acceptable per the brief).
+  On success, `router.refresh()` re-fetches the schedule.
+
+### Status eligibility (where the controls appear)
+
+| Status | Unscheduled panel button | Scheduled card buttons | Outside-hours / weekend row buttons |
+|---|---|---|---|
+| `draft` | **Schedule** | — | — |
+| `unscheduled` | **Schedule** | — | — |
+| `scheduled` | — | **Reschedule** + **Unschedule** | **Reschedule** + **Unschedule** |
+| `in_progress` | — | (read-only on calendar) | (read-only) |
+| `completed` | — | (read-only, dimmed) | (read-only) |
+| `canceled` | — | (filtered out by the loader) | — |
+
+`in_progress` / `completed` / `canceled` jobs never surface a
+scheduling control on the schedule page. Operator can recover via
+the Phase 9D status select on the job detail page.
+
+### Overlap warning behavior
+
+- Pure overlap detection is the Phase 10B `detectScheduleOverlaps`
+  helper: half-open `existing.start < proposed.end && existing.end >
+  proposed.start`, default 60 min when an end is missing, status
+  filter [`scheduled`, `in_progress`], `excludeJobId` excludes self.
+- Server pre-check loads candidates in a ±48-hour buffer around the
+  proposed range so long jobs anchored outside the window still
+  surface.
+- Result is a **warning**, never a hard block. Reason (per Phase 10
+  doc §11): no crew assignment exists yet, so two overlapping
+  scheduled jobs at the same time may be legitimate (two crews).
+- Operator clicks **Confirm anyway** to proceed; the action
+  re-runs the same write path with `confirmOverlap: true` and
+  records the conflict count in the activity row.
+
+### Activity behavior
+
+Three soft-fail activity types ship — all via the existing Phase 1
+`createActivity` helper, all non-blocking on the underlying
+mutation:
+
+| `activity_type` | Source | Details |
+|---|---|---|
+| `job.scheduled` | `scheduleJobAction` | `scheduled_start_at`, `scheduled_end_at`, `arrival_window_label`, `conflict_count`, `confirmed_overlap`. |
+| `job.rescheduled` | `rescheduleJobAction` | Same as above, plus `previous` snapshot of the old scheduling fields. |
+| `job.unscheduled` | `unscheduleJobAction` | `previous` snapshot of the old scheduling fields. |
+
+No message-automation calls. No customer SMS. No customer email.
+No GoHighLevel calls. The Phase 6D GHL guardrail is not reached
+from any Phase 10 path.
+
+### Tests / gates
+
+- 8 new `parseScheduleFormFields` tests.
+- 9 new `modal-helpers` tests.
+- Targeted: `parse-schedule-form` (8) + `modal-helpers` (9) +
+  `scheduling` (37) + `schedule-views` (4) = **58 / 58**.
+- `npx tsc --noEmit` clean.
+- `npm run test` → **709 / 709** across 62 files (was 692 / 692 ×
+  60 at Phase 10C close).
+- `npm run lint` clean.
+- `npm run build` green; `/admin/schedule` grew from **217 B → 2.76
+  kB** (modal + 3 action client wrappers + status eligibility
+  helpers). All other route bundles unchanged.
+
+### What Phase 10D deliberately does NOT do
+
+- **No drag/drop scheduling.** Click-to-modal only.
+- **No crew / technician assignment** anywhere.
+- **No route optimization** / drive-time / pin / map UI.
+- **No external calendar sync** (Google / iCal / Outlook /
+  anything).
+- **No customer notifications** on schedule / reschedule /
+  unschedule. No SMS, no email.
+- **No message-automation outcomes** from job-schedule events.
+- **No recurring jobs / visits.**
+- **No invoices / payments / quote acceptance.**
+- **No simulation-driven scheduling.** The schedule page works in
+  simulation workspaces (same `business_id` scoping) but Phase 10D
+  does not auto-schedule from simulation outcomes.
+- **No public `/q` changes.**
+- **No new database table or column.** Phase 10D reuses the Phase
+  9B `jobs` scheduling columns + the `activities` table.
+- **No new SQL migration.**
+- **No new low-level DB helpers.** Each action composes the
+  existing Phase 9B `updateJobScheduling` + `updateJobStatus`.
+- **No state machine / guarded workflow** beyond the per-action
+  eligibility check. Status-eligibility is pinned by
+  `modal-helpers` tests, not enforced via a DB CHECK.
+
+### Assumptions
+
+- Overlap candidates are loaded in a ±48-hour buffer around the
+  proposed range. This is generous enough to surface long jobs
+  while keeping the query small in practice (a single small
+  workspace will rarely have more than a few candidates in that
+  window). If a future workspace generates 100+ candidates in a
+  48-hour band, the loader's default-100 / max-500 `clampLimit`
+  caps the read.
+- The schedule page caches no client-side state across the modal
+  lifecycle — `router.refresh()` after a successful action
+  re-runs the Server Component loader and re-renders the entire
+  page. This trades a slightly chunkier round-trip for a simpler
+  modal lifecycle (no optimistic updates, no stale state to
+  reconcile).
+- `window.confirm` is acceptable for the unschedule confirmation
+  in Phase 10D per the brief; a custom dialog can land in a future
+  polish step if it's needed.
+- The modal uses native `<input type="date">` + `<input type="time">`
+  for cross-browser compatibility. Operators on browsers without
+  native time pickers still get a plain text field with the same
+  HH:MM string contract; the server-side parser tolerates either.

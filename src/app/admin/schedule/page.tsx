@@ -14,7 +14,11 @@ import {
   listScheduledJobsForWeek,
   listUnscheduledJobs,
 } from "@/core/jobs/admin-data";
-import { getWeekRange, parseWeekKey } from "@/core/jobs/scheduling";
+import {
+  formatWeekKey,
+  getWeekRange,
+  parseWeekKey,
+} from "@/core/jobs/scheduling";
 
 import { SignOutButton } from "../sign-out-button";
 import {
@@ -79,6 +83,15 @@ export default async function SchedulePage({ searchParams }: PageProps) {
     day: "numeric",
   });
 
+  // Schedule-modal default date: today when the visible week is
+  // today's week, otherwise Monday of the visible week.
+  // `formatWeekKey` is a local-YYYY-MM-DD formatter; it works on
+  // any Date, not just Mondays.
+  const fallbackScheduleDate =
+    visibleWeekRange.weekKey === todayWeekRange.weekKey
+      ? formatWeekKey(today)
+      : visibleWeekRange.weekKey;
+
   return (
     <AdminShell
       workspaceName={shell.workspaceName}
@@ -91,7 +104,7 @@ export default async function SchedulePage({ searchParams }: PageProps) {
       <PageHeader
         eyebrow="Operations"
         title="Schedule"
-        description="Place jobs onto a weekly calendar. Scheduling actions (schedule / reschedule / unschedule) ship in Phase 10D."
+        description="Place jobs onto a weekly calendar. Click Schedule on an unscheduled job, or Reschedule / Unschedule on a scheduled card."
       />
 
       {isSimulationWithoutActiveSave && (
@@ -125,12 +138,14 @@ export default async function SchedulePage({ searchParams }: PageProps) {
                 <ScheduleWeekGrid
                   jobs={classified.visibleJobs}
                   weekRange={visibleWeekRange}
+                  fallbackDate={fallbackScheduleDate}
                 />
               </div>
             ) : (
               <ScheduleWeekGrid
                 jobs={classified.visibleJobs}
                 weekRange={visibleWeekRange}
+                fallbackDate={fallbackScheduleDate}
               />
             )}
           </SectionCard>
@@ -143,12 +158,14 @@ export default async function SchedulePage({ searchParams }: PageProps) {
                   <OutsideHoursList
                     title={`Outside 8 AM–6 PM · ${classified.outsideHoursJobs.length}`}
                     jobs={classified.outsideHoursJobs}
+                    fallbackDate={fallbackScheduleDate}
                   />
                 )}
                 {classified.weekendJobs.length > 0 && (
                   <OutsideHoursList
                     title={`Weekend · ${classified.weekendJobs.length}`}
                     jobs={classified.weekendJobs}
+                    fallbackDate={fallbackScheduleDate}
                   />
                 )}
               </div>
@@ -165,7 +182,10 @@ export default async function SchedulePage({ searchParams }: PageProps) {
               {unscheduledJobs.length === 1 ? "" : "s"}
             </span>
           </div>
-          <UnscheduledJobsPanel jobs={unscheduledJobs} />
+          <UnscheduledJobsPanel
+            jobs={unscheduledJobs}
+            fallbackDate={fallbackScheduleDate}
+          />
         </div>
       </div>
 

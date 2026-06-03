@@ -197,6 +197,35 @@ export async function listUnscheduledJobs(input: {
   return data.map(rowToJob);
 }
 
+// Returns same-business jobs that could conflict with a proposed
+// scheduling window. Filters to status in [`scheduled`,
+// `in_progress`] (per Phase 10 doc §11) and `scheduled_start_at`
+// inside `[fromIso, toIso]`. Callers should widen the window by a
+// generous buffer (≈48h) around the proposed range so that long
+// jobs anchored outside the window still surface; the pure
+// `detectScheduleOverlaps` helper does the precise half-open math.
+export async function listScheduleOverlapCandidates(input: {
+  businessId: string;
+  fromIso: string;
+  toIso: string;
+  limit?: number;
+}): Promise<JobRow[]> {
+  if (!input.businessId || !input.fromIso || !input.toIso) return [];
+  const sb = createServiceRoleClient();
+  const { data, error } = await sb
+    .from("jobs")
+    .select(JOB_SELECT)
+    .eq("business_id", input.businessId)
+    .not("scheduled_start_at", "is", null)
+    .gte("scheduled_start_at", input.fromIso)
+    .lte("scheduled_start_at", input.toIso)
+    .in("status", ["scheduled", "in_progress"])
+    .order("scheduled_start_at", { ascending: true })
+    .limit(clampLimit(input.limit));
+  if (error || !data) return [];
+  return data.map(rowToJob);
+}
+
 export async function listJobsForContact(input: {
   businessId: string;
   contactId: string;

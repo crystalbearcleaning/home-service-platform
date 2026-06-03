@@ -19,10 +19,25 @@ import {
   type WeekRange,
 } from "@/core/jobs/scheduling";
 
-// Phase 10C — read-only schedule surface views. Pure server-side
-// presentation; no mutations, no modals, no drag/drop. The page
-// composes <ScheduleWeekGrid />, <OutsideHoursList />, and
-// <UnscheduledJobsPanel />.
+import {
+  RescheduleAction,
+  ScheduleAction,
+  UnscheduleAction,
+} from "./card-actions";
+import {
+  isJobReschedulableStatus,
+  isJobSchedulableStatus,
+  isJobUnschedulableStatus,
+} from "./modal-helpers";
+import { ScheduledCardWithDetails } from "./scheduled-card-details";
+
+// Phase 10C/D — schedule surface views. Server components compose
+// the read-only grid + lists; the Phase 10D card-actions slot in
+// the client buttons + modal per scheduled / unscheduled card.
+// Status eligibility per Phase 10 doc §10:
+//   - schedule → draft / unscheduled
+//   - reschedule + unschedule → scheduled only
+//   - in_progress / completed / canceled → no mutation controls
 
 const DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const VISIBLE_HOURS = SCHEDULE_VISIBLE_END_HOUR - SCHEDULE_VISIBLE_START_HOUR;
@@ -34,9 +49,11 @@ const VISIBLE_HOURS = SCHEDULE_VISIBLE_END_HOUR - SCHEDULE_VISIBLE_START_HOUR;
 export function ScheduleWeekGrid({
   jobs,
   weekRange,
+  fallbackDate,
 }: {
   jobs: ReadonlyArray<JobRow>;
   weekRange: WeekRange;
+  fallbackDate: string;
 }) {
   const byDay = groupJobsByDay(jobs, weekRange);
   const days = enumerateWeekDays(weekRange.start).slice(0, 5); // Mon–Fri
@@ -71,11 +88,14 @@ export function ScheduleWeekGrid({
         <div className="grid grid-cols-[60px_repeat(5,1fr)]">
           {/* Hour labels column */}
           <div className="relative">
-            <div className="relative" style={{ height: `${VISIBLE_HOURS * 56}px` }}>
+            <div
+              className="relative"
+              style={{ height: `${VISIBLE_HOURS * 56}px` }}
+            >
               {hourLabels.map((h, idx) => {
                 const topPct =
                   ((h - SCHEDULE_VISIBLE_START_HOUR) / VISIBLE_HOURS) * 100;
-                if (idx === hourLabels.length - 1) return null; // bottom edge label hidden
+                if (idx === hourLabels.length - 1) return null;
                 return (
                   <div
                     key={h}
@@ -99,7 +119,6 @@ export function ScheduleWeekGrid({
                 className="relative border-l border-line"
                 style={{ height: `${VISIBLE_HOURS * 56}px` }}
               >
-                {/* hour gridlines */}
                 {hourLabels.slice(1, -1).map((h) => {
                   const topPct =
                     ((h - SCHEDULE_VISIBLE_START_HOUR) / VISIBLE_HOURS) * 100;
@@ -112,21 +131,21 @@ export function ScheduleWeekGrid({
                   );
                 })}
 
-                {/* job cards */}
                 {cards.map((job) => {
                   const pos = calculateCalendarPosition({
                     scheduledStartAt: job.scheduledStartAt,
                     scheduledEndAt: job.scheduledEndAt,
                   });
                   if (!pos) return null;
-                  if (pos.heightPct <= 0) return null; // outside-hours rendering handled separately
+                  if (pos.heightPct <= 0) return null;
 
                   return (
-                    <ScheduledJobCard
+                    <ScheduledCardWithDetails
                       key={job.id}
                       job={job}
                       topPct={pos.topPct}
                       heightPct={pos.heightPct}
+                      fallbackDate={fallbackDate}
                     />
                   );
                 })}
@@ -147,71 +166,13 @@ function formatHourLabel(h: number): string {
 }
 
 // -------------------------------------------------------------------------
-// Scheduled job card (placed absolutely inside its day column)
-// -------------------------------------------------------------------------
-
-function ScheduledJobCard({
-  job,
-  topPct,
-  heightPct,
-}: {
-  job: JobRow;
-  topPct: number;
-  heightPct: number;
-}) {
-  const tone = jobStatusTone(job.status);
-  // Visually distinct for completed / in_progress so the operator
-  // can see what's already underway / done in the week (per
-  // Phase 10 doc §10).
-  const opacityClass =
-    job.status === "completed"
-      ? "opacity-70"
-      : job.status === "in_progress"
-        ? ""
-        : "";
-
-  return (
-    <Link
-      href={`/admin/jobs/${job.id}`}
-      style={{
-        top: `${topPct}%`,
-        height: `${Math.max(heightPct, 4)}%`,
-      }}
-      className={
-        "absolute left-1 right-1 overflow-hidden rounded-control border border-line bg-surface px-2 py-1 text-[11px] text-ink shadow-sm hover:border-ink/50 " +
-        opacityClass
-      }
-    >
-      <div className="flex items-baseline gap-1.5">
-        <StatusBadge tone={tone}>{jobStatusLabel(job.status)}</StatusBadge>
-      </div>
-      <div className="mt-0.5 truncate text-[11px] font-medium text-ink">
-        {job.title}
-      </div>
-      {job.contactFullName && (
-        <div className="truncate text-[10px] text-ink-muted">
-          {job.contactFullName}
-        </div>
-      )}
-      <div className="text-[10px] text-ink-faint">
-        {formatSchedulingRange({
-          startAt: job.scheduledStartAt,
-          endAt: job.scheduledEndAt,
-          arrivalWindowLabel: job.arrivalWindowLabel,
-        })}
-      </div>
-    </Link>
-  );
-}
-
-// -------------------------------------------------------------------------
 // Outside-hours / weekend list — never silently hide a scheduled job
 // -------------------------------------------------------------------------
 
 export type ScheduleClassification = {
-  visibleJobs: JobRow[]; // Mon–Fri AND inside 8–18
-  outsideHoursJobs: JobRow[]; // Mon–Fri AND outside 8–18 (or zero-height)
-  weekendJobs: JobRow[]; // Sat / Sun
+  visibleJobs: JobRow[];
+  outsideHoursJobs: JobRow[];
+  weekendJobs: JobRow[];
 };
 
 export function classifyScheduledJobs(
@@ -224,7 +185,7 @@ export function classifyScheduledJobs(
     if (!job.scheduledStartAt) continue;
     const start = new Date(job.scheduledStartAt);
     if (Number.isNaN(start.getTime())) continue;
-    const day = start.getDay(); // 0=Sun, 6=Sat
+    const day = start.getDay();
     if (day === 0 || day === 6) {
       weekend.push(job);
       continue;
@@ -253,17 +214,17 @@ export function classifyScheduledJobs(
 export function OutsideHoursList({
   title,
   jobs,
+  fallbackDate,
   emptyHint,
 }: {
   title: string;
   jobs: ReadonlyArray<JobRow>;
+  fallbackDate: string;
   emptyHint?: string;
 }) {
   if (jobs.length === 0) {
     if (!emptyHint) return null;
-    return (
-      <div className="text-[11px] text-ink-faint">{emptyHint}</div>
-    );
+    return <div className="text-[11px] text-ink-faint">{emptyHint}</div>;
   }
   return (
     <div>
@@ -271,40 +232,63 @@ export function OutsideHoursList({
       <ul className="divide-y divide-line rounded-control border border-line">
         {jobs.map((job) => (
           <li key={job.id} className="px-3 py-2">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <div className="min-w-0 space-y-0.5">
-                <div className="flex flex-wrap items-baseline gap-1.5">
-                  <Link
-                    href={`/admin/jobs/${job.id}`}
-                    className="truncate text-sm font-medium text-ink hover:underline"
-                  >
-                    {job.title}
-                  </Link>
-                  <StatusBadge tone={jobStatusTone(job.status)}>
-                    {jobStatusLabel(job.status)}
-                  </StatusBadge>
-                </div>
-                <div className="text-[11px] text-ink-muted">
-                  {job.contactFullName ?? "—"}
-                  {job.propertyAddressLine
-                    ? ` · ${job.propertyAddressLine}`
-                    : ""}
-                </div>
-                <div className="text-[11px] text-ink-faint">
-                  {formatSchedulingRange({
-                    startAt: job.scheduledStartAt,
-                    endAt: job.scheduledEndAt,
-                    arrivalWindowLabel: job.arrivalWindowLabel,
-                  })}
-                </div>
-              </div>
-              <div className="text-sm font-medium text-ink">
-                {formatCentsAsDollars(job.estimatedTotalCents)}
-              </div>
-            </div>
+            <OutsideHoursRow job={job} fallbackDate={fallbackDate} />
           </li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function OutsideHoursRow({
+  job,
+  fallbackDate,
+}: {
+  job: JobRow;
+  fallbackDate: string;
+}) {
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-2">
+      <div className="min-w-0 space-y-0.5">
+        <div className="flex flex-wrap items-baseline gap-1.5">
+          <Link
+            href={`/admin/jobs/${job.id}`}
+            className="truncate text-sm font-medium text-ink hover:underline"
+          >
+            {job.title}
+          </Link>
+          <StatusBadge tone={jobStatusTone(job.status)}>
+            {jobStatusLabel(job.status)}
+          </StatusBadge>
+        </div>
+        <div className="text-[11px] text-ink-muted">
+          {job.contactFullName ?? "—"}
+          {job.propertyAddressLine ? ` · ${job.propertyAddressLine}` : ""}
+        </div>
+        <div className="text-[11px] text-ink-faint">
+          {formatSchedulingRange({
+            startAt: job.scheduledStartAt,
+            endAt: job.scheduledEndAt,
+            arrivalWindowLabel: job.arrivalWindowLabel,
+          })}
+        </div>
+      </div>
+      <div className="flex flex-col items-end gap-1">
+        <span className="text-sm font-medium text-ink">
+          {formatCentsAsDollars(job.estimatedTotalCents)}
+        </span>
+        {(isJobReschedulableStatus(job.status) ||
+          isJobUnschedulableStatus(job.status)) && (
+          <div className="flex flex-wrap gap-1">
+            {isJobReschedulableStatus(job.status) && (
+              <RescheduleAction job={job} fallbackDate={fallbackDate} />
+            )}
+            {isJobUnschedulableStatus(job.status) && (
+              <UnscheduleAction jobId={job.id} title={job.title} />
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -315,8 +299,10 @@ export function OutsideHoursList({
 
 export function UnscheduledJobsPanel({
   jobs,
+  fallbackDate,
 }: {
   jobs: ReadonlyArray<JobRow>;
+  fallbackDate: string;
 }) {
   if (jobs.length === 0) {
     return (
@@ -332,14 +318,20 @@ export function UnscheduledJobsPanel({
     <ul className="space-y-2">
       {jobs.map((job) => (
         <li key={job.id}>
-          <UnscheduledJobCard job={job} />
+          <UnscheduledJobCard job={job} fallbackDate={fallbackDate} />
         </li>
       ))}
     </ul>
   );
 }
 
-function UnscheduledJobCard({ job }: { job: JobRow }) {
+function UnscheduledJobCard({
+  job,
+  fallbackDate,
+}: {
+  job: JobRow;
+  fallbackDate: string;
+}) {
   return (
     <div className="rounded-control border border-line bg-surface px-3 py-2.5">
       <div className="flex flex-wrap items-baseline gap-1.5">
@@ -362,13 +354,9 @@ function UnscheduledJobCard({ job }: { job: JobRow }) {
         <span className="text-sm font-medium text-ink">
           {formatCentsAsDollars(job.estimatedTotalCents)}
         </span>
-        <span
-          className="cursor-not-allowed rounded-control border border-line bg-surface px-2 py-1 text-[11px] text-ink-faint"
-          title="Scheduling action ships in Phase 10D"
-          aria-disabled="true"
-        >
-          Schedule · Coming next
-        </span>
+        {isJobSchedulableStatus(job.status) && (
+          <ScheduleAction job={job} fallbackDate={fallbackDate} />
+        )}
       </div>
     </div>
   );
