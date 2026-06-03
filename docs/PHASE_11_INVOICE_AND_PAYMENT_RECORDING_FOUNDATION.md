@@ -1178,3 +1178,106 @@ The migration is **created but not applied**. Operator runs
 `supabase db push` when ready. Re-applying is safe in dev
 (`create table` is the standard pattern; `CREATE POLICY` is
 preceded by `DROP POLICY IF EXISTS`).
+
+---
+
+## Appendix B — Phase 11C Invoices nav + list + read-only detail + job-detail section (delivered)
+
+**Status:** the read-only Invoices surface is live. CRM nav now
+includes **Invoices** as the fourth entry; `/admin/invoices` list
++ `/admin/invoices/[invoiceId]` detail ship; the job detail page
+gains a read-only Invoices section. **No mutations, no
+Complete Job modal, no Mark Paid, no Mark Receipt Sent.** **No
+schema changes.** **Added:** 2026-06-03.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/components/admin/nav-config.ts` | Added the fourth CRM entry: **Invoices** → `/admin/invoices`, icon `receipt`. |
+| `src/components/admin/nav-config.test.ts` | CRM group test now requires `[contacts, quotes, jobs, invoices]`; updated the "Invoices not built" assertion to reflect that Phase 11C ships Invoices (Properties remains not built). |
+| `src/components/admin/icons.tsx` | Added a `receipt` icon (outline 24×24 with classic zig-zag bottom and three list lines). |
+| `src/app/admin/invoices/page.tsx` | List page. Renders `<AdminShell>` + status-filter pills + invoices list. Each row shows short id (link to detail), status + source badges, contact + property line, source job link, created date, total, amount paid, balance, paid date, receipt status. Empty state mentions Complete Job → Create Invoice ships in 11D. |
+| `src/app/admin/invoices/[invoiceId]/page.tsx` | Read-only detail. Sections: header (status + source badges + back link), Summary (Total / Amount Paid / Balance / Receipt + paid_at / receipt_sent_at timestamps), Customer + property (linked back to contact + source job), Line items table (Item / Source / Qty / Unit / Total + Subtotal + Total footer rows), Payments table (Paid at / Method / Amount / Notes), created/updated timestamps. Uses `notFound()` for missing invoices. |
+| `src/app/admin/jobs/[jobId]/page.tsx` | Loads `listInvoicesForJob` alongside the existing job + line-items + services parallel fetch. Adds a new **Invoices** SectionCard below Line items showing each invoice's short id (link to detail), status + source badges, receipt status, total, balance. Empty state: "No invoices created for this job yet." |
+
+### Nav behavior
+
+- CRM group now contains `Contacts → Quotes → Jobs → Invoices` in
+  that order.
+- Nav active-state highlight pins Invoices on `/admin/invoices`
+  and `/admin/invoices/<id>` via Phase 7C's
+  `resolveActiveNavHref` (longest-prefix wins).
+
+### Invoices list behavior
+
+- Status-filter pills: `All / Draft / Unpaid / Paid / Void`.
+  Filter routes via `?status=…`; unknown values fall back to
+  "All".
+- Each row links the short id (invoice number or first 8 chars of
+  uuid) to the detail page. Source job link inline.
+- Empty state copy adapts to whether the filter is "All" (mentions
+  Phase 11D Complete Job flow) or a specific status (suggests
+  trying a different filter).
+- **No Create invoice button** — the brief explicitly bars it.
+  The read-only contract stays unambiguous; Phase 11D will wire
+  the real flow from the Job detail page.
+
+### Invoice detail behavior
+
+- Header surfaces title (`Invoice {shortId}`), status + source
+  badges, and a "← All invoices" back link.
+- Summary section renders Total / Amount Paid / Balance / Receipt
+  in a 4-column KV strip plus an optional row for paid_at /
+  receipt_sent_at timestamps.
+- Customer + property section links to the Phase 4 contact hub +
+  the Phase 9 job detail page.
+- Line items table reuses the existing `formatJobQuantity` helper
+  for quantity display; subtotal + total foot rows mirror the
+  Phase 9C job detail layout.
+- Payments table renders `paid_at / method / amount / notes`;
+  empty state mentions Mark Paid ships in 11E.
+- Missing invoice → `notFound()` (Next.js 404).
+
+### Job detail invoice section
+
+- New **Invoices** `<SectionCard>` below Line items.
+- Uses `listInvoicesForJob` (Phase 11B server loader).
+- Empty state: "No invoices created for this job yet." (No
+  "Coming next" affordance — Phase 11D will add the real
+  Complete Job button.)
+- Each row links to the invoice detail and shows status badge,
+  source badge, receipt status, total, balance.
+
+### Tests / gates
+
+- 1 nav-config test updated to expect the 4-entry CRM ordering;
+  1 negative-assertion test updated to confirm Invoices is now
+  present.
+- Targeted: `nav-config` (25) + invoices `totals` (19) +
+  invoices `validation` (25) + invoices `display` (10) →
+  **79 / 79**.
+- `npx tsc --noEmit` clean.
+- `npm run test` → **763 / 763** across 65 files (unchanged from
+  Phase 11B close — no new pure helpers introduced).
+- `npm run lint` clean.
+- `npm run build` green; `/admin/invoices` lands at **226 B**;
+  `/admin/invoices/[invoiceId]` at **226 B**; `/admin/jobs/[jobId]`
+  unchanged at **4.27 kB** (the new invoice section is server-
+  rendered with no extra client JS).
+
+### What Phase 11C deliberately does NOT do
+
+- No Complete Job button / modal (Phase 11D).
+- No Manual Create Invoice from Job button (Phase 11D).
+- No Mark Paid button / modal (Phase 11E).
+- No Mark Receipt Sent button (Phase 11E).
+- No invoice editing UI.
+- No void / delete actions.
+- No payment-processor / Stripe / Square integration.
+- No customer notifications, no SMS, no email — the message
+  engine is not even reached from any Phase 11 path.
+- No simulation-driven invoicing.
+- No public `/q` changes.
+- No schema changes (Phase 11B migration covers everything Phase
+  11C reads).

@@ -23,7 +23,8 @@ export type AdminIconKey =
   | "megaphone"
   | "flask"
   | "briefcase"
-  | "calendar";
+  | "calendar"
+  | "receipt";
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
@@ -153,6 +154,14 @@ const ICONS: Record<AdminIconKey, (props: IconProps) => React.ReactElement> = {
       <path d="M3 10h18" />
       <path d="M8 3v4" />
       <path d="M16 3v4" />
+    </Base>
+  ),
+  receipt: (p) => (
+    <Base {...p}>
+      <path d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z" />
+      <path d="M9 8h6" />
+      <path d="M9 12h6" />
+      <path d="M9 16h4" />
     </Base>
   ),
 };

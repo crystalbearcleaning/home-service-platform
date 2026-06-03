@@ -70,7 +70,7 @@ describe("resolveAdminNav", () => {
     expect(hrefs).not.toContain("/admin/marketing/seo");
   });
 
-  it("CRM group contains Contacts + Quotes + Jobs (in that order)", () => {
+  it("CRM group contains Contacts + Quotes + Jobs + Invoices (in that order)", () => {
     const groups = resolveAdminNav({ stagingToolsEnabled: false });
     const crm = groups.find((g) => g.label === "CRM");
     expect(crm).toBeDefined();
@@ -78,6 +78,7 @@ describe("resolveAdminNav", () => {
       "/admin/contacts",
       "/admin/quotes",
       "/admin/jobs",
+      "/admin/invoices",
     ]);
   });
 
@@ -103,11 +104,11 @@ describe("resolveAdminNav", () => {
     expect(hrefs).not.toContain("/admin/leads");
   });
 
-  it("does not include Invoices / top-level Properties placeholders (Phase 9 ships Jobs only)", () => {
+  it("does not include top-level Properties placeholder (Phase 11C ships Invoices)", () => {
     const groups = resolveAdminNav({ stagingToolsEnabled: true });
     const hrefs = groups.flatMap((g) => g.items.map((i) => i.href));
-    // Jobs landed in Phase 9C; Invoices + Properties remain unbuilt.
-    expect(hrefs).not.toContain("/admin/invoices");
+    // Invoices landed in Phase 11C; Properties remains unbuilt.
+    expect(hrefs).toContain("/admin/invoices");
     expect(hrefs).not.toContain("/admin/properties");
   });
 

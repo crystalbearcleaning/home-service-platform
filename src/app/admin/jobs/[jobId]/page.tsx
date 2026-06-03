@@ -23,6 +23,13 @@ import {
 import { getJob, getJobLineItems } from "@/core/jobs/admin-data";
 import { listServicesForJobForm } from "@/core/jobs/admin-form-data";
 import type { JobStatus } from "@/core/jobs/constants";
+import { listInvoicesForJob } from "@/core/invoices/admin-data";
+import {
+  invoiceSourceLabel,
+  invoiceStatusLabel,
+  invoiceStatusTone,
+  receiptDisplayLabel,
+} from "@/core/invoices/display";
 
 import { SignOutButton } from "../../sign-out-button";
 import { LineItemsEditor } from "./line-items-editor";
@@ -56,9 +63,10 @@ export default async function JobDetailPage({ params }: PageProps) {
   const job = await getJob({ businessId: business.id, jobId });
   if (!job) notFound();
 
-  const [lineItems, services] = await Promise.all([
+  const [lineItems, services, jobInvoices] = await Promise.all([
     getJobLineItems({ businessId: business.id, jobId: job.id }),
     listServicesForJobForm(business.id),
+    listInvoicesForJob({ businessId: business.id, jobId: job.id }),
   ]);
 
   return (
@@ -179,6 +187,72 @@ export default async function JobDetailPage({ params }: PageProps) {
             services={services}
             initialEstimatedTotalCents={job.estimatedTotalCents}
           />
+        </SectionCard>
+      </div>
+
+      <div className="mt-6">
+        <SectionCard
+          title={`Invoices (${jobInvoices.length})`}
+          description="Read-only. Complete Job → Create Invoice ships in Phase 11D."
+          padding="none"
+        >
+          {jobInvoices.length === 0 ? (
+            <div className="p-5 text-xs text-ink-muted">
+              No invoices created for this job yet.
+            </div>
+          ) : (
+            <ul className="divide-y divide-line">
+              {jobInvoices.map((inv) => {
+                const shortId = inv.invoiceNumber ?? inv.id.slice(0, 8);
+                return (
+                  <li key={inv.id} className="px-4 py-3">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-baseline gap-2">
+                          <Link
+                            href={`/admin/invoices/${inv.id}`}
+                            className="truncate text-sm font-medium text-ink hover:underline"
+                          >
+                            {shortId}
+                          </Link>
+                          <StatusBadge tone={invoiceStatusTone(inv.status)}>
+                            {invoiceStatusLabel(inv.status)}
+                          </StatusBadge>
+                          <StatusBadge tone="neutral">
+                            {invoiceSourceLabel(inv.source)}
+                          </StatusBadge>
+                        </div>
+                        <div className="text-[11px] text-ink-faint">
+                          Receipt:{" "}
+                          {receiptDisplayLabel({
+                            status: inv.status,
+                            receiptSentAtIso: inv.receiptSentAt,
+                          })}
+                        </div>
+                      </div>
+                      <div className="shrink-0 space-y-0.5 text-right">
+                        <div className="text-sm font-medium text-ink">
+                          {formatCentsAsDollars(inv.totalCents)}
+                        </div>
+                        <div className="text-[11px] text-ink-muted">
+                          Balance{" "}
+                          <span
+                            className={
+                              inv.balanceCents > 0
+                                ? "text-ink"
+                                : "text-ink-faint"
+                            }
+                          >
+                            {formatCentsAsDollars(inv.balanceCents)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </SectionCard>
       </div>
 
