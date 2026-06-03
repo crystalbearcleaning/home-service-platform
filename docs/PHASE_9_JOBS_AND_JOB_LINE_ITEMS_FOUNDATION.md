@@ -986,3 +986,78 @@ The migration is **created but not applied**. Operator runs
 `supabase db push` when ready. Re-applying is safe in dev
 (`create table` matches the Phase 1 / 5 / 7B convention; CREATE
 POLICY is preceded by DROP POLICY IF EXISTS).
+
+---
+
+## Appendix B — Phase 9C Jobs nav + list + read-only detail (delivered)
+
+**Status:** `/admin/jobs` list, `/admin/jobs/[jobId]` read-only
+detail, and a new **Jobs** entry under the CRM nav group all ship.
+**No create / edit / status-change / scheduling-edit / quote-
+conversion flows.** **No schema changes.**
+**Added:** 2026-06-02.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/components/admin/nav-config.ts` | Added the third CRM entry: **Jobs** → `/admin/jobs`, icon `briefcase`. |
+| `src/components/admin/nav-config.test.ts` | CRM group test now requires `[contacts, quotes, jobs]`; older "does not include `/admin/jobs`" assertion updated to reflect that Phase 9C ships Jobs (Invoices + Properties remain not built). |
+| `src/components/admin/icons.tsx` | Added a `briefcase` icon (outline 24×24, matches the rest of the admin icon set). |
+| `src/core/jobs/display.ts` | Pure presentation helpers: `jobStatusLabel`, `jobStatusTone`, `jobSourceLabel`, `jobLineItemSourceLabel`, `formatCentsAsDollars`, `formatJobQuantity`, `formatSchedulingTimestamp`, `formatSchedulingRange`. |
+| `src/core/jobs/display.test.ts` | 17 pure unit tests pinning every label / tone / formatter (including the "Not scheduled" / "→" / "·" range branches). |
+| `src/app/admin/jobs/page.tsx` | List page. Renders `<AdminShell>` + status filter pills + jobs list. Each row shows title (link to detail), status badge, source badge, contact + property line, scheduling range, estimated total, created date, and a "from quote" link when present. Empty state matches the filter (all-vs-one). |
+| `src/app/admin/jobs/[jobId]/page.tsx` | Read-only detail. Sections: customer + property (linked back to contact / quote), scheduling (read-only, with the formatted range), line items table (Item / Source / Qty / Unit / Total + footer total row), created/updated timestamps. Uses `notFound()` for missing jobs. |
+
+### Nav behavior
+
+- CRM group now contains `Contacts → Quotes → Jobs` in that order.
+- Nav-active highlight pins the right item per Phase 7C's
+  `resolveActiveNavHref` (longest-prefix wins) on both
+  `/admin/jobs` and `/admin/jobs/<id>`.
+
+### Jobs list behavior
+
+- Status filter pills: `All / Draft / Unscheduled / Scheduled /
+  In progress / Completed / Canceled`. Filter routes via
+  `?status=…` query param; unknown values fall back to "All".
+- Each row links the job title to the detail page; "from quote"
+  badge links to `/admin/quotes/[quoteId]` when set.
+- Empty state copy adapts to whether the filter is "All" (mentions
+  Phase 9D / 9E) or a specific status (suggests trying a different
+  filter).
+- **No Create Job button** — the brief allows showing one only if
+  disabled / "Coming next." The page deliberately doesn't render
+  one so the read-only contract is unambiguous; Phase 9D will add
+  the real button at the same affordance.
+
+### Job detail behavior
+
+- Header surfaces title + summary + status badge + source badge +
+  total + a "← All jobs" back link.
+- Customer + property section links to the Phase 4 contact-hub and
+  the source quote when set.
+- Scheduling section is read-only — three KV cells
+  (`scheduled_start_at`, `scheduled_end_at`, `arrival_window_label`)
+  + a single "Window: …" summary line via `formatSchedulingRange`.
+- Line items table renders Name (with optional description + service
+  name), source label (Catalog / Custom / From quote), quantity,
+  unit price, line total. A footer row shows the estimated total
+  from `jobs.estimated_total_cents`.
+- Missing job → `notFound()` (Next.js standard 404).
+
+### What Phase 9C deliberately does NOT do
+
+- No Create Job button / form (Phase 9D).
+- No status-change select (Phase 9D).
+- No scheduling field edits (Phase 9D).
+- No line item add / remove / edit (Phase 9D).
+- No quote-to-job conversion button on the quote detail page
+  (Phase 9E).
+- No `activities` writes (Phase 9F).
+- No invoices / payments / scheduling calendar.
+- No message-engine calls, no customer notifications.
+- No simulation-driven job generation.
+- No public `/q` changes.
+- No schema changes (Phase 9B migration covers everything Phase 9C
+  reads).

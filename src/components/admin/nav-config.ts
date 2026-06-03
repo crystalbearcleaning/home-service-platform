@@ -51,6 +51,11 @@ const RAW_NAV: AdminNavGroup[] = [
         href: "/admin/quotes",
         icon: "document",
       },
+      {
+        label: "Jobs",
+        href: "/admin/jobs",
+        icon: "briefcase",
+      },
     ],
   },
   {
