@@ -15,7 +15,10 @@ import {
   updateJobScheduling,
   updateJobStatus,
 } from "@/core/jobs/admin-create";
+import { getJob } from "@/core/jobs/admin-data";
 import type { JobLineItemSource } from "@/core/jobs/constants";
+import { createInvoiceFromJob } from "@/core/invoices/admin-create";
+import { isJobCompletionEligibleStatus } from "@/core/invoices/job-completion";
 
 // =========================================================================
 // Phase 9D — /admin/jobs server actions.
@@ -426,4 +429,208 @@ export async function createJobFromQuoteAction(input: {
   revalidatePath(`/admin/quotes/${input.quoteId}`);
 
   return { ok: true, data: result.data };
+}
+
+// =========================================================================
+// Phase 11D — Complete Job → Create Invoice + Manual Create Invoice
+// =========================================================================
+
+export type CompleteJobAndCreateInvoicePayload = {
+  jobId: string;
+  invoiceId: string;
+  lineItemCount: number;
+  totalCents: number;
+  balanceCents: number;
+};
+
+function revalidateAfterInvoiceCreate(jobId: string, invoiceId: string) {
+  revalidatePath("/admin/jobs");
+  revalidatePath(`/admin/jobs/${jobId}`);
+  revalidatePath("/admin/invoices");
+  revalidatePath(`/admin/invoices/${invoiceId}`);
+  // The Phase 10 schedule surface filters out completed jobs from
+  // the unscheduled panel and adds them as visually-distinct cards
+  // on the calendar; revalidate to keep both views fresh after a
+  // completion + invoice.
+  revalidatePath("/admin/schedule");
+}
+
+export async function completeJobAndCreateInvoiceAction(input: {
+  jobId: string;
+}): Promise<ActionResult<CompleteJobAndCreateInvoicePayload>> {
+  const auth = await requireBusiness();
+  if (!auth.ok) return auth;
+
+  const jobId = input.jobId?.trim();
+  if (!jobId) {
+    return {
+      ok: false,
+      error: { code: "INVALID_INPUT", message: "Missing jobId." },
+    };
+  }
+
+  // Re-verify job ownership + status eligibility server-side.
+  const job = await getJob({ businessId: auth.businessId, jobId });
+  if (!job) {
+    return {
+      ok: false,
+      error: { code: "NOT_FOUND", message: "Job not found." },
+    };
+  }
+  if (!isJobCompletionEligibleStatus(job.status)) {
+    return {
+      ok: false,
+      error: {
+        code: "INVALID_STATUS",
+        message: `Cannot complete a ${job.status} job.`,
+      },
+    };
+  }
+
+  // Flip job status to completed via the Phase 9B helper.
+  const statusRes = await updateJobStatus({
+    businessId: auth.businessId,
+    jobId,
+    status: "completed",
+  });
+  if (!statusRes.ok) {
+    return { ok: false, error: statusRes.error };
+  }
+
+  // Create the invoice from the now-completed job. Source =
+  // job_completion (default). Status = unpaid (default). Phase 11
+  // doc §5: copies job_line_items → invoice_line_items as a
+  // snapshot.
+  const invRes = await createInvoiceFromJob({
+    businessId: auth.businessId,
+    jobId,
+    source: "job_completion",
+  });
+  if (!invRes.ok) {
+    // Job status is already `completed` at this point. We do NOT
+    // attempt to roll the job status back — ordered writes posture
+    // matches Phase 9B/10D. Surface the error so the operator can
+    // retry the manual fallback.
+    return { ok: false, error: invRes.error };
+  }
+
+  // Soft-fail activity rows (Phase 11 doc §18). Failures are
+  // non-blocking — the job is completed and the invoice is real.
+  void createActivity({
+    businessId: auth.businessId,
+    actorType: "user",
+    actorUserId: auth.userId,
+    activityType: "job.completed_with_invoice",
+    summary: `Job completed: ${job.title}`,
+    relatedObjectType: "job",
+    relatedObjectId: jobId,
+    details: {
+      invoice_id: invRes.data.invoiceId,
+      line_item_count: invRes.data.lineItemCount,
+      total_cents: invRes.data.totalCents,
+    },
+  });
+  void createActivity({
+    businessId: auth.businessId,
+    actorType: "user",
+    actorUserId: auth.userId,
+    activityType: "invoice.created_from_job",
+    summary: `Invoice created from completed job: ${job.title}`,
+    relatedObjectType: "invoice",
+    relatedObjectId: invRes.data.invoiceId,
+    details: {
+      job_id: jobId,
+      line_item_count: invRes.data.lineItemCount,
+      total_cents: invRes.data.totalCents,
+      source: "job_completion",
+    },
+  });
+
+  revalidateAfterInvoiceCreate(jobId, invRes.data.invoiceId);
+
+  return {
+    ok: true,
+    data: {
+      jobId,
+      invoiceId: invRes.data.invoiceId,
+      lineItemCount: invRes.data.lineItemCount,
+      totalCents: invRes.data.totalCents,
+      balanceCents: invRes.data.balanceCents,
+    },
+  };
+}
+
+// Manual fallback (§4B): creates an invoice from a job without
+// touching job status. Allowed on any status — operator may want
+// to re-invoice a completed job, or invoice a canceled job's
+// partial work. UI surfaces existing invoices first (Phase 11C
+// already renders the list); this action does not hard-block
+// duplicates per §16.
+export async function createInvoiceFromJobAction(input: {
+  jobId: string;
+}): Promise<
+  ActionResult<{
+    jobId: string;
+    invoiceId: string;
+    lineItemCount: number;
+    totalCents: number;
+    balanceCents: number;
+  }>
+> {
+  const auth = await requireBusiness();
+  if (!auth.ok) return auth;
+
+  const jobId = input.jobId?.trim();
+  if (!jobId) {
+    return {
+      ok: false,
+      error: { code: "INVALID_INPUT", message: "Missing jobId." },
+    };
+  }
+
+  const job = await getJob({ businessId: auth.businessId, jobId });
+  if (!job) {
+    return {
+      ok: false,
+      error: { code: "NOT_FOUND", message: "Job not found." },
+    };
+  }
+
+  const invRes = await createInvoiceFromJob({
+    businessId: auth.businessId,
+    jobId,
+    source: "manual",
+  });
+  if (!invRes.ok) {
+    return { ok: false, error: invRes.error };
+  }
+
+  void createActivity({
+    businessId: auth.businessId,
+    actorType: "user",
+    actorUserId: auth.userId,
+    activityType: "invoice.created_from_job",
+    summary: `Invoice created from job: ${job.title}`,
+    relatedObjectType: "invoice",
+    relatedObjectId: invRes.data.invoiceId,
+    details: {
+      job_id: jobId,
+      line_item_count: invRes.data.lineItemCount,
+      total_cents: invRes.data.totalCents,
+      source: "manual",
+    },
+  });
+
+  revalidateAfterInvoiceCreate(jobId, invRes.data.invoiceId);
+
+  return {
+    ok: true,
+    data: {
+      jobId,
+      invoiceId: invRes.data.invoiceId,
+      lineItemCount: invRes.data.lineItemCount,
+      totalCents: invRes.data.totalCents,
+      balanceCents: invRes.data.balanceCents,
+    },
+  };
 }

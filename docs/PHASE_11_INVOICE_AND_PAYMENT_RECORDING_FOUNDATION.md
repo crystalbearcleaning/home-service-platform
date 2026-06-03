@@ -1281,3 +1281,180 @@ schema changes.** **Added:** 2026-06-03.
 - No public `/q` changes.
 - No schema changes (Phase 11B migration covers everything Phase
   11C reads).
+
+---
+
+## Appendix C — Phase 11D Complete Job → Create Invoice + Manual fallback (delivered)
+
+**Status:** the job detail page is now interactive. A **Complete
+Job and create invoice** confirmation modal ships, plus a
+**Create invoice from this job (manual)** fallback button. Both
+paths share the Phase 11B `createInvoiceFromJob` helper. Two
+soft-fail activity rows per success (`job.completed_with_invoice`,
+`invoice.created_from_job`). **No Mark Paid, no Mark Receipt Sent,
+no invoice editing, no schema changes.** **Added:** 2026-06-03.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/core/invoices/job-completion.ts` | Pure: `isJobCompletionEligibleStatus` (true for `draft` / `unscheduled` / `scheduled` / `in_progress`), `deriveCompleteJobButtonState` (returns `"primary"` / `"deemphasized"` / `"hidden"` based on status + existing invoice count — drives the §16 "discourage duplicates" UX). |
+| `src/core/invoices/job-completion.test.ts` | 5 pure tests pinning eligibility across all 6 job statuses + the three button states across the relevant inputs. |
+| `src/app/admin/jobs/actions.ts` | Added two server actions: `completeJobAndCreateInvoiceAction` and `createInvoiceFromJobAction`. Both re-verify ownership + (for completion) status eligibility before invoking Phase 9B `updateJobStatus` and Phase 11B `createInvoiceFromJob`. Soft-fail `createActivity` rows; revalidates `/admin/jobs`, `/admin/jobs/[jobId]`, `/admin/invoices`, `/admin/invoices/[invoiceId]`, and `/admin/schedule`. |
+| `src/app/admin/jobs/[jobId]/complete-job-button.tsx` | Client component. Renders the primary or de-emphasized trigger plus a confirmation modal with a read-only line-items preview (Name / Qty / Unit / Total), the computed job total, and the "this will mark the job completed and create an unpaid invoice" copy. Submit → `completeJobAndCreateInvoiceAction` → `router.push('/admin/invoices/<id>')`. |
+| `src/app/admin/jobs/[jobId]/manual-invoice-button.tsx` | Client component. Small de-emphasized button; when the job already has invoices, the click triggers a `window.confirm` listing the count before calling `createInvoiceFromJobAction`. Redirects to the new invoice on success. |
+| `src/app/admin/jobs/[jobId]/page.tsx` | Wires both buttons via a new `<InvoiceActions />` sub-component embedded at the top of the existing Invoices SectionCard. Uses `deriveCompleteJobButtonState` to decide which trigger to render and uses an "ineligible-status" branch (e.g. `completed` / `canceled` jobs) that hides the Complete Job button but keeps the manual fallback. |
+
+### Complete Job modal behavior
+
+- Trigger appears at the top of the Invoices section on
+  `/admin/jobs/[jobId]`.
+- Variant decided by `deriveCompleteJobButtonState`:
+  - **`primary`**: status eligible + no existing invoices →
+    accent-colored "Complete job and create invoice" CTA.
+  - **`deemphasized`**: status eligible + ≥ 1 existing invoice →
+    outlined "Complete job and create another invoice" button +
+    inline notice listing the existing invoice count
+    ("Review existing invoices before adding another").
+  - **`hidden`**: status `completed` / `canceled` → button not
+    rendered, replaced with a "Complete Job is not available on
+    a {status} job" notice plus the manual fallback.
+- Modal opens with:
+  - Job title + status pill + contact + property line.
+  - Read-only line-items table (Name + description / Qty / Unit /
+    Total) with a Total foot row (`estimated_total_cents`).
+  - Empty-state row when the job has no line items
+    ("The invoice will be created with zero total").
+  - Copy: *"This will mark the job completed and create an
+    unpaid invoice. Payment is recorded separately. No customer
+    notification is sent."*
+- Submit → `completeJobAndCreateInvoiceAction({ jobId })` →
+  redirect to `/admin/invoices/[invoiceId]` on success. Error
+  messages render inline. Cancel + backdrop click close the modal
+  unless a submit is in flight.
+
+### Complete Job → Invoice behavior
+
+- Server action re-verifies ownership via `getJob` and status
+  eligibility via `isJobCompletionEligibleStatus`.
+- Calls Phase 9B `updateJobStatus('completed')`.
+- Calls Phase 11B `createInvoiceFromJob({ source: 'job_completion' })`
+  which:
+  - Verifies the job's `business_id` again.
+  - Loads `job_line_items` and copies them into
+    `invoice_line_items` (`source='job'`, `job_line_item_id`
+    preserved, service_id preserved).
+  - Inserts the parent `invoices` row with
+    `status='unpaid'`, `source='job_completion'`,
+    `amount_paid_cents=0`.
+  - Recomputes `subtotal_cents` / `total_cents` /
+    `balance_cents` from the actual inserted rows.
+- Atomicity follows the Phase 9B / 10D / 11B posture: ordered
+  writes + recompute. If `createInvoiceFromJob` fails after the
+  status flip, the job is left in `completed` and the operator
+  can use the manual fallback. No Postgres RPC introduced.
+- Soft-fail activities written **after** the writes succeed:
+  - `job.completed_with_invoice` (related to the job)
+  - `invoice.created_from_job` with `source='job_completion'`
+    (related to the invoice)
+- Revalidates the five paths listed above so the jobs list,
+  detail, schedule, invoices list, and the new invoice detail
+  page are all fresh on the next render.
+
+### Manual Create Invoice fallback behavior
+
+- Available alongside Complete Job on every variant
+  (`primary` / `deemphasized` / `hidden`).
+- Calls `createInvoiceFromJobAction({ jobId })` which calls
+  `createInvoiceFromJob({ source: 'manual' })`.
+- **Does not change job status.**
+- When the job already has invoices, a `window.confirm` listing
+  the count appears before the action fires (soft block — the
+  operator can still proceed; per §16 there is no hard limit).
+- Activity row: `invoice.created_from_job` with `source='manual'`.
+- Redirects to `/admin/invoices/[invoiceId]` on success.
+
+### Status-rule recap
+
+| Job status | Complete Job | Manual fallback |
+|---|---|---|
+| `draft` | ✅ primary / de-emphasized | ✅ allowed |
+| `unscheduled` | ✅ primary / de-emphasized | ✅ allowed |
+| `scheduled` | ✅ primary / de-emphasized | ✅ allowed |
+| `in_progress` | ✅ primary / de-emphasized | ✅ allowed |
+| `completed` | ❌ hidden | ✅ allowed (re-invoice scenarios) |
+| `canceled` | ❌ hidden | ✅ allowed (partial-work scenarios) |
+
+The pure `deriveCompleteJobButtonState` helper centralises the UI
+rule so the eligibility decision stays testable. The server
+actions re-enforce the same rules — UI gating is convenience, not
+security.
+
+### Activity behavior
+
+Two new activity types ship — all via the existing Phase 1
+`createActivity` helper, all soft-fail (non-blocking on the
+underlying mutation):
+
+| `activity_type` | Source | Details payload |
+|---|---|---|
+| `job.completed_with_invoice` | `completeJobAndCreateInvoiceAction` | `invoice_id`, `line_item_count`, `total_cents`. |
+| `invoice.created_from_job` | Both actions | `job_id`, `line_item_count`, `total_cents`, `source: 'job_completion' \| 'manual'`. |
+
+- No `sendSms` / `sendEmail` / `notification_logs` /
+  `sendInternalSmsNotification` calls.
+- No `message-automation` triggers.
+- Phase 6D GHL guardrail is not reached from any Phase 11D path.
+
+### Tests / gates
+
+- 5 new `job-completion` pure tests.
+- Targeted: invoices `totals` (19) + `validation` (25) + `display`
+  (10) + `job-completion` (5) + `nav-config` (25) = **84/84**.
+- `npx tsc --noEmit` clean.
+- `npm run test` → **768/768** across 66 files (was 763/763 ×
+  65 at Phase 11C close — Phase 11D adds 5 tests + 1 file).
+- `npm run lint` clean.
+- `npm run build` green; `/admin/jobs/[jobId]` grew **4.27 kB →
+  5.32 kB** (added Complete Job modal + manual button client
+  bundles). `/admin/invoices` and `/admin/invoices/[invoiceId]`
+  unchanged at 226 B each.
+
+### What Phase 11D deliberately does NOT do
+
+- **No Mark Paid UI / action.** Phase 11E ships
+  `recordInvoicePaymentAction` + the modal.
+- **No Mark Receipt Sent UI / action.** Phase 11E.
+- **No invoice editing.** No line item add / remove / reorder /
+  edit on invoices.
+- **No invoice voiding** UI. The `void` status exists in the
+  enum (Phase 11B); no UI surfaces it yet.
+- **No online payments / Stripe / Square / payment links.**
+- **No customer notifications.** No SMS, no email, no GHL.
+- **No message-automation outcomes.**
+- **No taxes / discounts / refunds.**
+- **No simulation-driven invoicing.**
+- **No public `/q` changes.**
+- **No new database table or column.** Phase 11B schema covers
+  everything Phase 11D writes.
+- **No new low-level DB helpers.** Both actions compose existing
+  Phase 9B `updateJobStatus` and Phase 11B `createInvoiceFromJob`.
+- **No hard block on duplicate invoices.** Per §16 — UI
+  discourages, operator decides.
+
+### Assumptions
+
+- The Phase 11B `createInvoiceFromJob` snapshot rule already
+  matches the brief (copies `job_line_items` →
+  `invoice_line_items` with `job_line_item_id` preserved + zero
+  `amount_paid_cents` + `balance_cents = total_cents`); no
+  changes were required to the Phase 11B helpers in this phase.
+- The Complete Job + Manual buttons are both rendered server-side
+  and lift to client components only inside the small modal /
+  button shells — `/admin/invoices/*` pages stayed server-only
+  (226 B each), no UI changes there.
+- `router.push` on success rather than `router.refresh` →
+  navigates directly to the new invoice detail. The Phase 9D
+  pattern (`router.refresh()`) is used by mutations that keep
+  the operator on the same page; creation flows that produce a
+  new entity navigate to it.

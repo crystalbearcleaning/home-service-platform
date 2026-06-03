@@ -31,8 +31,12 @@ import {
   receiptDisplayLabel,
 } from "@/core/invoices/display";
 
+import { deriveCompleteJobButtonState } from "@/core/invoices/job-completion";
+
 import { SignOutButton } from "../../sign-out-button";
+import { CompleteJobButton } from "./complete-job-button";
 import { LineItemsEditor } from "./line-items-editor";
+import { ManualInvoiceButton } from "./manual-invoice-button";
 import { SchedulingForm } from "./scheduling-form";
 import { StatusControl } from "./status-control";
 
@@ -193,11 +197,21 @@ export default async function JobDetailPage({ params }: PageProps) {
       <div className="mt-6">
         <SectionCard
           title={`Invoices (${jobInvoices.length})`}
-          description="Read-only. Complete Job → Create Invoice ships in Phase 11D."
+          description="Mark Paid + Mark Receipt Sent ship in Phase 11E."
           padding="none"
         >
+          <InvoiceActions
+            jobId={job.id}
+            jobTitle={job.title}
+            jobStatus={job.status}
+            contactName={job.contactFullName}
+            propertyAddressLine={job.propertyAddressLine}
+            lineItems={lineItems}
+            estimatedTotalCents={job.estimatedTotalCents}
+            existingInvoiceCount={jobInvoices.length}
+          />
           {jobInvoices.length === 0 ? (
-            <div className="p-5 text-xs text-ink-muted">
+            <div className="px-4 pb-4 text-xs text-ink-muted">
               No invoices created for this job yet.
             </div>
           ) : (
@@ -277,6 +291,90 @@ function KV({
         {label}
       </div>
       <div className="mt-0.5 truncate text-ink">{value}</div>
+    </div>
+  );
+}
+
+function InvoiceActions({
+  jobId,
+  jobTitle,
+  jobStatus,
+  contactName,
+  propertyAddressLine,
+  lineItems,
+  estimatedTotalCents,
+  existingInvoiceCount,
+}: {
+  jobId: string;
+  jobTitle: string;
+  jobStatus: string;
+  contactName: string | null;
+  propertyAddressLine: string | null;
+  lineItems: ReadonlyArray<{
+    id: string;
+    name: string;
+    description: string | null;
+    quantity: number;
+    unitPriceCents: number;
+    totalCents: number;
+  }>;
+  estimatedTotalCents: number;
+  existingInvoiceCount: number;
+}) {
+  const buttonState = deriveCompleteJobButtonState({
+    status: jobStatus,
+    existingInvoiceCount,
+  });
+
+  if (buttonState === "hidden") {
+    // Status not eligible (completed / canceled). Manual fallback
+    // still allowed per §4B; operator may re-invoice.
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <p className="text-[11px] text-ink-muted">
+          Complete Job is not available on a {jobStatus} job. You can still
+          create an invoice manually.
+        </p>
+        <ManualInvoiceButton
+          jobId={jobId}
+          existingInvoiceCount={existingInvoiceCount}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+      {buttonState === "deemphasized" && existingInvoiceCount > 0 && (
+        <p className="text-[11px] text-ink-muted">
+          This job already has {existingInvoiceCount} invoice
+          {existingInvoiceCount === 1 ? "" : "s"}. Review existing invoices
+          before adding another.
+        </p>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <CompleteJobButton
+          jobId={jobId}
+          jobTitle={jobTitle}
+          jobStatus={jobStatus}
+          contactName={contactName}
+          propertyAddressLine={propertyAddressLine}
+          lineItems={lineItems.map((li) => ({
+            id: li.id,
+            name: li.name,
+            description: li.description,
+            quantity: li.quantity,
+            unitPriceCents: li.unitPriceCents,
+            totalCents: li.totalCents,
+          }))}
+          estimatedTotalCents={estimatedTotalCents}
+          variant={buttonState === "primary" ? "primary" : "deemphasized"}
+        />
+        <ManualInvoiceButton
+          jobId={jobId}
+          existingInvoiceCount={existingInvoiceCount}
+        />
+      </div>
     </div>
   );
 }
