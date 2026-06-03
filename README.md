@@ -205,6 +205,43 @@ delete / archive flows on jobs / job_line_items beyond what Phase
 field edit). See §§18–19 of the Phase 9 doc before extending
 scope.
 
+Phase 9 is **complete** — see `docs/PHASE_9_QA_REPORT.md` for the
+sign-off.
+
+Phase 10 is the **Job Scheduling Foundation** phase. It sits on
+top of Phase 9 Jobs and turns the existing scheduling columns
+(`scheduled_start_at`, `scheduled_end_at`, `arrival_window_label`,
+`status='scheduled'`) into a real Jobber-style schedule surface: a
+new `/admin/schedule` page with a week calendar (Mon–Fri, visible
+8 AM–6 PM band, week navigation), an unscheduled-jobs panel
+listing `draft` / `unscheduled` jobs with `scheduled_start_at IS
+NULL`, scheduled job cards placed by start/end, click-to-schedule
+modal, reschedule modal pre-loaded with current values, unschedule
+action that clears all three scheduling fields and flips status to
+`unscheduled`, a basic same-business overlap warning (soft, not a
+hard block, since no crew assignment exists yet), and links from
+cards to `/admin/jobs/[jobId]`. Phase 10A is **docs only**. The
+source-of-truth design doc is:
+
+- `docs/PHASE_10_JOB_SCHEDULING_FOUNDATION.md`
+
+Phase 10 stays narrow: no drag/drop scheduling, no day / month /
+agenda views, no crew / technician assignment, no crew capacity,
+no conflict hard-blocking, no configurable business hours, no
+route optimization, no drive-time calculations, no Google Calendar
+(or any external calendar) sync, no customer reminders / texts /
+emails on schedule events, no message-automation outcomes from
+schedule events, no recurring jobs / visits, no visits /
+appointments table, no multi-day job row splitting, no invoices,
+no payments, no quote acceptance / payment portal, no customer-
+facing schedule views, no public `/q` changes, no simulation-
+driven scheduling, no AI / context-engine expansion, no plugin
+builder / marketplace, no data import / export, and no edit /
+delete / archive flows on jobs beyond the three scheduling
+actions. Phase 10 must **not** add a new database table or a new
+column on `jobs` — it reuses the Phase 9B scheduling columns. See
+§§15–17 of the Phase 10 doc before extending scope.
+
 ---
 
 ## Tech Stack
