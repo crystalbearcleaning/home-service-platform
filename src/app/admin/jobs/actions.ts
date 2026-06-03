@@ -162,6 +162,24 @@ export async function createManualJobAction(
   });
   if (!result.ok) return { ok: false, error: result.error };
 
+  // Soft-fail activity row for the manual creation path (Phase 9F).
+  // Pattern matches Phase 9E's `job.created_from_quote` write.
+  void createActivity({
+    businessId: auth.businessId,
+    actorType: "user",
+    actorUserId: auth.userId,
+    activityType: "job.created_manually",
+    summary: `Job created manually: ${input.title.trim()}`,
+    relatedObjectType: "job",
+    relatedObjectId: result.data.jobId,
+    details: {
+      contact_id: input.contactId,
+      property_id: input.propertyId,
+      line_item_count: result.data.lineItemCount,
+      estimated_total_cents: result.data.estimatedTotalCents,
+    },
+  });
+
   revalidateAfterJobMutation(result.data.jobId);
   return { ok: true, data: { jobId: result.data.jobId } };
 }
@@ -183,6 +201,19 @@ export async function updateJobStatusAction(input: {
     status: input.status,
   });
   if (!r.ok) return { ok: false, error: r.error };
+
+  // Soft-fail status-change activity (Phase 9F). No message-automation
+  // trigger — the Phase 6D GHL guardrail is not reached.
+  void createActivity({
+    businessId: auth.businessId,
+    actorType: "user",
+    actorUserId: auth.userId,
+    activityType: "job.status_changed",
+    summary: `Job status changed to ${r.data.status}`,
+    relatedObjectType: "job",
+    relatedObjectId: input.jobId,
+    details: { status: r.data.status },
+  });
 
   revalidateAfterJobMutation(input.jobId);
   return { ok: true, data: { status: r.data.status } };
