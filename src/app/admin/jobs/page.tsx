@@ -73,7 +73,15 @@ export default async function JobsPage({ searchParams }: PageProps) {
       <PageHeader
         eyebrow="CRM"
         title="Jobs"
-        description="Work orders for approved or planned work. Read-only in Phase 9C — manual creation lands in 9D, quote-to-job conversion in 9E."
+        description="Work orders for approved or planned work. Quote-to-job conversion ships in Phase 9E."
+        actions={
+          <Link
+            href="/admin/jobs/new"
+            className="rounded-control bg-accent px-3 py-1.5 text-sm text-on-accent hover:opacity-90"
+          >
+            Create job
+          </Link>
+        }
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-3 text-xs">
@@ -95,7 +103,7 @@ export default async function JobsPage({ searchParams }: PageProps) {
               }
               description={
                 statusFilter === "all"
-                  ? "Manual job creation arrives in the next step (Phase 9D). Quote-to-job conversion follows in Phase 9E."
+                  ? "Use Create job to add a manual work order. Quote-to-job conversion arrives in Phase 9E."
                   : "Try a different status filter."
               }
             />

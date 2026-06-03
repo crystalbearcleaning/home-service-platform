@@ -1061,3 +1061,119 @@ conversion flows.** **No schema changes.**
 - No public `/q` changes.
 - No schema changes (Phase 9B migration covers everything Phase 9C
   reads).
+
+---
+
+## Appendix C — Phase 9D manual creation + basic editing (delivered)
+
+**Status:** manual job creation at `/admin/jobs/new`, status select +
+scheduling form + line-items add/edit/remove on the detail page, and
+the Create Job button on the jobs list all ship. **No quote-to-job
+conversion (Phase 9E), no invoices/payments, no scheduling calendar,
+no customer notifications.** **No schema changes.**
+**Added:** 2026-06-02.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/core/jobs/admin-form-data.ts` | Server-only loaders for the create form + line-item editor: `listContactsForJobForm` (active contacts only, ≤500), `listPropertiesForJobForm` (all properties with `contact_id`, ≤1000), `listPropertiesForContact` (≤50), `listServicesForJobForm` (active services, ≤200). |
+| `src/app/admin/jobs/actions.ts` | Six server actions: `createManualJobAction`, `updateJobStatusAction`, `updateJobSchedulingAction`, `addJobLineItemAction`, `updateJobLineItemAction`, `removeJobLineItemAction`. Each resolves auth + active business, parses dollars → cents at the boundary, then delegates to the Phase 9B helpers. Revalidates `/admin/jobs` + `/admin/jobs/[jobId]` on success. |
+| `src/app/admin/jobs/new/page.tsx` | Server page for the create flow. Loads contacts + properties + services in parallel. Accepts `?contactId=` so future "Create job" links from contact detail can pre-fill. Empty state when no contacts exist. |
+| `src/app/admin/jobs/new/create-job-form.tsx` | Client form. Contact select + (filtered) property select + title + summary + scheduling (3 inputs) + dynamic line-items list with both **Custom** and **Catalog** add affordances. Live total preview. Redirects to `/admin/jobs/[jobId]` on success. |
+| `src/app/admin/jobs/[jobId]/status-control.tsx` | Client `<select>` that auto-saves status on change via `updateJobStatusAction`, with a "Saving…" indicator and rollback on error. |
+| `src/app/admin/jobs/[jobId]/scheduling-form.tsx` | Client form for `scheduled_start_at` / `scheduled_end_at` / `arrival_window_label`. Datetime-locals are converted to ISO at the action boundary; end ≥ start enforced by the Phase 9B validator. |
+| `src/app/admin/jobs/[jobId]/line-items-editor.tsx` | Client editor on the existing line-items table. Row-level Edit (inline form) and Remove (with confirm); add-line affordance (Custom or Catalog). Banner reports the new total after every mutation. |
+| `src/app/admin/jobs/[jobId]/page.tsx` | Detail page wires the three editors in place of the Phase 9C read-only sections. Status control sits below the header pills. Line-items editor replaces the read-only table. |
+| `src/app/admin/jobs/page.tsx` | List header now ships the real **Create job** button (action slot). Empty-state copy updated. |
+| `src/core/jobs/dollar-input.test.ts` | 6 unit tests pinning the `parseDollarsToCents` dollar-string → bigint cents contract the actions rely on. |
+
+### Manual job creation behavior
+
+- Operator goes to `/admin/jobs/new` (button on `/admin/jobs`).
+- Contact select lists every **active** contact in the workspace,
+  sorted by name. Property select filters client-side to the
+  selected contact's properties (disabled until a contact is
+  picked). Empty contact list shows a friendly "Add a contact
+  first" empty state instead of the form.
+- Operator fills title (required), optional summary, optional
+  scheduling fields.
+- Line items: at least one required. Each line has Custom or
+  Catalog source; Catalog lines pre-fill name/service id from the
+  selected service. Per-line: name, qty (numeric, > 0), unit price
+  (dollars, ≥ 0), optional description. Live "Estimated total"
+  preview at the bottom (computed client-side from valid rows).
+- Submit → `createManualJobAction` → backend validates +
+  re-verifies FK ownership for contact / property / service →
+  inserts job + line items + recomputes
+  `estimated_total_cents` → redirect to `/admin/jobs/[jobId]`.
+- Defaults: `status='draft'`, `source='manual'`.
+- Pre-fill via `/admin/jobs/new?contactId=<id>` is supported for
+  future contact-detail "Create job" links.
+
+### Job detail editing behavior
+
+- **Status control** — small `<select>` directly under the
+  header pills. Auto-saves on change (`updateJobStatusAction`).
+  Optimistic UI; rolls back on error. No automation triggers.
+- **Scheduling form** — `<datetime-local>` start / end + free-form
+  arrival window label. Save button calls
+  `updateJobSchedulingAction`. End ≥ start enforced server-side.
+  Current window summary printed under the form.
+- **Line items editor** — replaces the Phase 9C read-only table:
+  - Each row has **Edit** (opens inline form replacing the row) +
+    **Remove** (browser confirm dialog).
+  - **+ Custom line** and (when services exist) **+ Catalog line**
+    affordances open an add form below the table.
+  - Catalog source pre-fills name from the picked service; the
+    operator may still tweak qty/unit/description per line.
+  - Each mutation surfaces a banner with the freshly-recomputed
+    estimated total (returned by the Phase 9B helpers).
+  - Source-`quote` lines (snapshotted from a quote in Phase 9E)
+    show a small note when edited: "Editing only changes the line
+    itself; the source quote is not affected."
+
+### Line item behavior
+
+- Quantity is `numeric(10,2)` server-side; the form accepts
+  `step="0.01"`. Quantities round client-side via the live preview
+  and server-side via `validateJobLineItemForm` (rounded to two
+  decimals).
+- Unit price is **dollars in the form, cents in the DB**
+  (`parseDollarsToCents` at the boundary). `total_cents` is
+  server-recomputed via `computeJobLineItemTotal`.
+- After every add / update / remove, `jobs.estimated_total_cents`
+  is recomputed from the actual line-item rows via Phase 9B's
+  `recomputeJobEstimatedTotal`.
+
+### Tests / gates
+
+- 6 new dollar-input tests pinning `parseDollarsToCents` contract.
+- Targeted: 6 dollar-input + 17 display + 24 validation +
+  11 quote-snapshot + 8 totals = **66/66** jobs tests.
+- `npm run test` — **645/645** across 58 files (was 639/639 at
+  Phase 9C).
+- `npm run lint` clean (one `<a>` → `<Link>` swap in the cancel
+  button fixed during gates).
+- `npm run build` green; `/admin/jobs/[jobId]` grew to 4.04 kB,
+  `/admin/jobs/new` lands at 3.22 kB.
+
+### What Phase 9D deliberately does NOT do
+
+- No quote-to-job conversion (Phase 9E).
+- No `activities` writes (Phase 9F).
+- No `notes` UI on the job detail page (Phase 9F polish).
+- No customer notifications, no SMS, no email, no message-engine
+  calls. The Phase 6D GHL guardrail is not even reached.
+- No simulation-driven job generation.
+- No invoices / payments / deposits / taxes / discounts.
+- No scheduling calendar / crew assignment / conflict detection /
+  recurring jobs.
+- No drag-to-reorder line items (sort_order stored on insert,
+  derived from the operator's add order; no UI to change it
+  post-hoc beyond the per-row Edit form).
+- No bulk line-item operations.
+- No edit / delete / archive on jobs themselves beyond status
+  changes (a `canceled` status is the closest to "archive").
+- No public `/q` changes.
+- No schema changes.

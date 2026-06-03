@@ -3,7 +3,6 @@ import { notFound, redirect } from "next/navigation";
 
 import {
   AdminShell,
-  EmptyState,
   PageHeader,
   SectionCard,
   StatusBadge,
@@ -15,17 +14,20 @@ import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
 import {
   formatCentsAsDollars,
-  formatJobQuantity,
   formatSchedulingRange,
   formatSchedulingTimestamp,
-  jobLineItemSourceLabel,
   jobSourceLabel,
   jobStatusLabel,
   jobStatusTone,
 } from "@/core/jobs/display";
 import { getJob, getJobLineItems } from "@/core/jobs/admin-data";
+import { listServicesForJobForm } from "@/core/jobs/admin-form-data";
+import type { JobStatus } from "@/core/jobs/constants";
 
 import { SignOutButton } from "../../sign-out-button";
+import { LineItemsEditor } from "./line-items-editor";
+import { SchedulingForm } from "./scheduling-form";
+import { StatusControl } from "./status-control";
 
 export const dynamic = "force-dynamic";
 
@@ -54,10 +56,10 @@ export default async function JobDetailPage({ params }: PageProps) {
   const job = await getJob({ businessId: business.id, jobId });
   if (!job) notFound();
 
-  const lineItems = await getJobLineItems({
-    businessId: business.id,
-    jobId: job.id,
-  });
+  const [lineItems, services] = await Promise.all([
+    getJobLineItems({ businessId: business.id, jobId: job.id }),
+    listServicesForJobForm(business.id),
+  ]);
 
   return (
     <AdminShell
@@ -88,6 +90,13 @@ export default async function JobDetailPage({ params }: PageProps) {
         >
           ← All jobs
         </Link>
+      </div>
+
+      <div className="mb-6 rounded-control border border-line bg-surface px-3 py-2">
+        <StatusControl
+          jobId={job.id}
+          initialStatus={job.status as JobStatus}
+        />
       </div>
 
       <SectionCard
@@ -141,24 +150,16 @@ export default async function JobDetailPage({ params }: PageProps) {
       <div className="mt-6">
         <SectionCard
           title="Scheduling"
-          description="Read-only in Phase 9C — editing arrives in 9D. The full scheduling calendar is a future phase."
+          description="Three simple fields. The full scheduling calendar is a future phase."
         >
-          <dl className="grid grid-cols-1 gap-3 text-xs sm:grid-cols-3">
-            <KV
-              label="Scheduled start"
-              value={formatSchedulingTimestamp(job.scheduledStartAt)}
-            />
-            <KV
-              label="Scheduled end"
-              value={formatSchedulingTimestamp(job.scheduledEndAt)}
-            />
-            <KV
-              label="Arrival window"
-              value={job.arrivalWindowLabel ?? "—"}
-            />
-          </dl>
+          <SchedulingForm
+            jobId={job.id}
+            initialStartAt={job.scheduledStartAt}
+            initialEndAt={job.scheduledEndAt}
+            initialArrivalWindowLabel={job.arrivalWindowLabel}
+          />
           <p className="mt-3 text-[11px] text-ink-faint">
-            Window: {formatSchedulingRange({
+            Current window: {formatSchedulingRange({
               startAt: job.scheduledStartAt,
               endAt: job.scheduledEndAt,
               arrivalWindowLabel: job.arrivalWindowLabel,
@@ -170,76 +171,14 @@ export default async function JobDetailPage({ params }: PageProps) {
       <div className="mt-6">
         <SectionCard
           title={`Line items (${lineItems.length})`}
-          description={
-            lineItems.length === 0
-              ? "No line items yet."
-              : "Read-only in Phase 9C — add / edit / remove arrives in 9D."
-          }
-          padding={lineItems.length === 0 ? "default" : "none"}
+          description="Add / edit / remove line items. Job total recalculates on every change."
         >
-          {lineItems.length === 0 ? (
-            <EmptyState
-              title="No line items"
-              description="This job has no line items. Manual editing arrives in Phase 9D."
-            />
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead className="bg-surface-muted text-[10px] uppercase tracking-wide text-ink-faint">
-                  <tr>
-                    <th className="px-4 py-2 text-left font-medium">Item</th>
-                    <th className="px-4 py-2 text-left font-medium">Source</th>
-                    <th className="px-4 py-2 text-right font-medium">Qty</th>
-                    <th className="px-4 py-2 text-right font-medium">
-                      Unit price
-                    </th>
-                    <th className="px-4 py-2 text-right font-medium">Total</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line">
-                  {lineItems.map((li) => (
-                    <tr key={li.id}>
-                      <td className="px-4 py-2 align-top">
-                        <div className="font-medium text-ink">{li.name}</div>
-                        {li.description && (
-                          <div className="text-[11px] text-ink-muted">
-                            {li.description}
-                          </div>
-                        )}
-                        {li.serviceName && (
-                          <div className="text-[10px] text-ink-faint">
-                            Service: {li.serviceName}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-2 align-top text-[11px] text-ink-muted">
-                        {jobLineItemSourceLabel(li.source)}
-                      </td>
-                      <td className="px-4 py-2 text-right align-top text-ink">
-                        {formatJobQuantity(li.quantity)}
-                      </td>
-                      <td className="px-4 py-2 text-right align-top text-ink">
-                        {formatCentsAsDollars(li.unitPriceCents)}
-                      </td>
-                      <td className="px-4 py-2 text-right align-top font-medium text-ink">
-                        {formatCentsAsDollars(li.totalCents)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-line bg-surface-muted">
-                    <td className="px-4 py-2 text-right font-medium text-ink" colSpan={4}>
-                      Estimated total
-                    </td>
-                    <td className="px-4 py-2 text-right font-semibold text-ink">
-                      {formatCentsAsDollars(job.estimatedTotalCents)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
+          <LineItemsEditor
+            jobId={job.id}
+            initialLineItems={lineItems}
+            services={services}
+            initialEstimatedTotalCents={job.estimatedTotalCents}
+          />
         </SectionCard>
       </div>
 
