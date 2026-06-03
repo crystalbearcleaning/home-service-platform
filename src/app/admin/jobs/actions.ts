@@ -2,11 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 
+import { createActivity } from "@/core/activity/logger";
 import { createClient } from "@/core/auth/server";
 import { getActiveBusinessForUser } from "@/core/business/active-business";
 import { parseDollarsToCents } from "@/core/door-hanger/calculations";
 import {
   addJobLineItem,
+  createJobFromQuote,
   createManualJob,
   removeJobLineItem,
   updateJobLineItem,
@@ -340,4 +342,57 @@ export async function removeJobLineItemAction(input: {
 
   revalidateAfterJobMutation(input.jobId);
   return { ok: true, data: r.data };
+}
+
+// =========================================================================
+// Quote → Job conversion (Phase 9E)
+// =========================================================================
+
+export type CreateJobFromQuotePayload = {
+  jobId: string;
+  estimatedTotalCents: number;
+  lineItemCount: number;
+  snapshotSource: "line_items_snapshot" | "selected_total_fallback" | "empty";
+  warnings: string[];
+};
+
+export async function createJobFromQuoteAction(input: {
+  quoteId: string;
+  title?: string | null;
+  summary?: string | null;
+}): Promise<ActionResult<CreateJobFromQuotePayload>> {
+  const auth = await requireBusiness();
+  if (!auth.ok) return auth;
+
+  const result = await createJobFromQuote({
+    businessId: auth.businessId,
+    quoteId: input.quoteId,
+    title: input.title ?? null,
+    summary: input.summary ?? null,
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  // Soft-write a single "job.created_from_quote" activity row. Failure
+  // is non-blocking — the job is real; the activity is a feed entry.
+  void createActivity({
+    businessId: auth.businessId,
+    actorType: "user",
+    actorUserId: auth.userId,
+    activityType: "job.created_from_quote",
+    summary: "Job created from quote",
+    relatedObjectType: "job",
+    relatedObjectId: result.data.jobId,
+    details: {
+      quote_id: input.quoteId,
+      line_item_count: result.data.lineItemCount,
+      snapshot_source: result.data.snapshotSource,
+      warnings: result.data.warnings,
+    },
+  });
+
+  revalidatePath("/admin/jobs");
+  revalidatePath(`/admin/jobs/${result.data.jobId}`);
+  revalidatePath(`/admin/quotes/${input.quoteId}`);
+
+  return { ok: true, data: result.data };
 }

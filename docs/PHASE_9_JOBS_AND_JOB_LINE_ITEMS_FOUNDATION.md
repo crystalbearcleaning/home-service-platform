@@ -1177,3 +1177,118 @@ no customer notifications.** **No schema changes.**
   changes (a `canceled` status is the closest to "archive").
 - No public `/q` changes.
 - No schema changes.
+
+---
+
+## Appendix D — Phase 9E Quote → Job conversion (delivered)
+
+**Status:** Quote detail page now ships a **Create job** button that
+snapshots the quote into a new job + line items, plus a "Jobs created
+from this quote" list. Re-conversion is allowed. **No invoices, no
+payments, no scheduling calendar, no customer notifications, no
+public `/q` changes.** **No schema changes.**
+**Added:** 2026-06-02.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/app/admin/jobs/actions.ts` | Added `createJobFromQuoteAction` (uses Phase 9B `createJobFromQuote` helper) + a soft-fail `createActivity` write for `activity_type='job.created_from_quote'`. Imports the existing `core/activity/logger` — no new helper introduced. Revalidates `/admin/jobs`, `/admin/jobs/[jobId]`, and `/admin/quotes/[quoteId]`. |
+| `src/app/admin/quotes/[quoteId]/create-job-button.tsx` | Client button + transition state. Calls the action, redirects to the new job's detail page on success, surfaces server errors inline. Label flips to "Create another job" when prior jobs exist. |
+| `src/app/admin/quotes/[quoteId]/page.tsx` | New "Convert to job" `<SectionCard>` immediately under the page header. Shows the button + a per-job list of `listJobsForQuote` results (title link, status badge, total, created date). Existing Customer / Property / Selection / Lead / snapshot sections unchanged. |
+
+### Quote → Job behavior
+
+- Operator opens `/admin/quotes/[quoteId]` → clicks **Create job**.
+- Server action resolves auth + active business → delegates to the
+  Phase 9B `createJobFromQuote` helper, which:
+  - Verifies the quote belongs to the active business.
+  - Calls `parseQuoteLineItemsSnapshot` (Phase 9B):
+    - Preferred → reads `quotes.line_items_snapshot` as an array of
+      `{option_key, label, amount, kind}` (Auto-Quote Plugin shape);
+      `amount` (dollars) is converted to bigint cents.
+    - Fallback → builds one line item from `selected_total` +
+      option label resolved from `options_snapshot`.
+    - Empty → creates the job with zero line items + a warning.
+  - Inserts the `jobs` row (`source='quote'`, `status='unscheduled'`,
+    `quote_id` preserved, contact + property copied from the quote).
+  - Inserts `job_line_items` rows (`source='quote'`, `serviceId=null`
+    per the parser contract).
+  - Recomputes `jobs.estimated_total_cents` from the inserted line
+    items.
+- Soft-fail `createActivity` call writes a `job.created_from_quote`
+  activity row with metadata `{quote_id, line_item_count,
+  snapshot_source, warnings}` — failure does not roll back the job.
+- Action returns `{jobId, estimatedTotalCents, lineItemCount,
+  snapshotSource, warnings}`; the client component redirects to
+  `/admin/jobs/[jobId]`.
+- Re-conversion allowed — `quote_id` is not unique on `jobs`. Each
+  click creates a new job; the label changes to "Create another
+  job" once at least one job exists for the quote.
+
+### Quote detail behavior
+
+- "Convert to job" SectionCard sits immediately under the page
+  header, above the existing Customer / Property / Selection / Lead
+  sections.
+- When at least one job exists for the quote, the section also
+  renders a list:
+  - Job title (links to `/admin/jobs/[jobId]`)
+  - Status badge (using the Phase 9C tone map)
+  - `estimated_total_cents` formatted as USD
+  - Created date
+- Empty state when none exist — implicit (only the button + the
+  "snapshot, not a live mirror" footnote render).
+
+### Job snapshot / line item behavior
+
+- Snapshot copy is owned by the Phase 9B parser; Phase 9E does not
+  introduce new parsing rules.
+- Money flows: `quotes.selected_total` (numeric dollars) →
+  `Math.round(× 100)` → bigint cents on every line item +
+  `jobs.estimated_total_cents`.
+- Job is a **snapshot**, not a live mirror — later edits to the
+  quote do not retroactively rewrite the job. This matches the
+  Phase 9A doc §5 rule and is documented in the button's footnote.
+- The job's source-`quote` lines remain fully editable via the
+  Phase 9D line-items editor (`source='quote'` rows show a small
+  note in the inline edit form explaining edits don't propagate
+  back to the quote).
+
+### Conversion activity
+
+- Phase 9E ships **one** activity row per successful conversion:
+  `activity_type='job.created_from_quote'`,
+  `related_object_type='job'`, `related_object_id=<new job id>`,
+  `details={quote_id, line_item_count, snapshot_source, warnings}`.
+- Write is soft-fail (`void createActivity(...)`) — the job exists
+  regardless of whether the activity insert succeeds.
+- No message-engine calls, no SMS, no email, no public `/q` change.
+
+### Tests / gates
+
+- Conversion logic is already covered by Phase 9B's
+  `quote-snapshot.test.ts` (11 tests) + the broader `validation` /
+  `totals` / `display` / `dollar-input` suites (55 more tests).
+- `npx tsc --noEmit` clean.
+- `npm run test` — **645/645** across 58 files (unchanged from
+  Phase 9D — the action is a thin wrapper around already-tested
+  pure helpers).
+- `npm run lint` clean.
+- `npm run build` green; `/admin/quotes/[quoteId]` grew to 814 B
+  (was 214 B at Phase 4 close).
+
+### What Phase 9E deliberately does NOT do
+
+- No invoices / payments / payment portal / quote acceptance.
+- No customer notifications, no SMS, no email.
+- No message-automation outcomes from job-from-quote conversion.
+- No full scheduling calendar.
+- No simulation-driven job generation.
+- No persisted parser warnings on the job row — warnings flow back
+  to the action result and into the activity row metadata, but the
+  job detail page does not display them post-redirect (deferred to
+  Phase 9F polish).
+- No public `/q` changes.
+- No schema changes — Phase 9B + the existing `activities` table
+  cover everything Phase 9E touches.

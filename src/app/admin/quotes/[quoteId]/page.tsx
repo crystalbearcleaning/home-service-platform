@@ -14,6 +14,13 @@ import {
   renderSimulationBanner,
 } from "@/components/admin";
 import { getAdminQuoteDetail } from "@/core/quotes/admin-data";
+import { listJobsForQuote } from "@/core/jobs/admin-data";
+import {
+  formatCentsAsDollars,
+  jobStatusLabel,
+  jobStatusTone,
+} from "@/core/jobs/display";
+import { CreateJobButton } from "./create-job-button";
 import { SignOutButton } from "../../sign-out-button";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +49,11 @@ export default async function QuoteDetailPage({ params }: Props) {
     quoteId,
   });
   if (!detail) notFound();
+
+  const jobsFromQuote = await listJobsForQuote({
+    businessId: business.id,
+    quoteId,
+  });
 
   const expiredByDate = new Date(detail.quote.expiresAt).getTime() < Date.now();
 
@@ -79,6 +91,58 @@ export default async function QuoteDetailPage({ params }: Props) {
         }
       />
 
+      <SectionCard title="Convert to job">
+        <CreateJobButton
+          quoteId={quoteId}
+          hasExistingJobs={jobsFromQuote.length > 0}
+        />
+        <p className="mt-2 text-[11px] text-ink-faint">
+          Creates a Job (work order) and snapshots this quote into its
+          line items. The job is a snapshot, not a live mirror — later
+          edits to this quote do not change the job. No customer
+          notifications fire.
+        </p>
+
+        {jobsFromQuote.length > 0 && (
+          <div className="mt-4">
+            <div className="text-[11px] uppercase tracking-wide text-ink-faint">
+              Jobs created from this quote
+            </div>
+            <ul className="mt-2 divide-y divide-line">
+              {jobsFromQuote.map((j) => (
+                <li
+                  key={j.id}
+                  className="flex flex-wrap items-baseline justify-between gap-2 py-2 text-xs"
+                >
+                  <div className="min-w-0">
+                    <Link
+                      href={`/admin/jobs/${j.id}`}
+                      className="truncate text-sm font-medium text-ink hover:underline"
+                    >
+                      {j.title}
+                    </Link>
+                    <span className="ml-2">
+                      <StatusBadge tone={jobStatusTone(j.status)}>
+                        {jobStatusLabel(j.status)}
+                      </StatusBadge>
+                    </span>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <div className="font-medium text-ink">
+                      {formatCentsAsDollars(j.estimatedTotalCents)}
+                    </div>
+                    <div className="text-[10px] text-ink-faint">
+                      Created {new Date(j.createdAt).toLocaleDateString()}
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </SectionCard>
+
+      <div className="mt-6">
       <SectionCard
         title="Customer"
         actions={
@@ -105,6 +169,7 @@ export default async function QuoteDetailPage({ params }: Props) {
           <p className="text-xs text-ink-muted">Contact not found.</p>
         )}
       </SectionCard>
+      </div>
 
       <div className="mt-6">
         <SectionCard title="Property">

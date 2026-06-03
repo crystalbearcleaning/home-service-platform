@@ -271,7 +271,7 @@ export async function createJobFromQuote(
   const { data: quote, error: qErr } = await sb
     .from("quotes")
     .select(
-      "id,business_id,contact_id,property_id,selected_option_key,selected_total,options_snapshot,line_items_snapshot",
+      "id,business_id,contact_id,property_id,selected_option_key,selected_add_ons,selected_total,options_snapshot,line_items_snapshot",
     )
     .eq("id", input.quoteId)
     .maybeSingle();
@@ -294,6 +294,7 @@ export async function createJobFromQuote(
     lineItemsSnapshot: quote.line_items_snapshot,
     optionsSnapshot: quote.options_snapshot,
     selectedOptionKey: quote.selected_option_key ?? null,
+    selectedAddOns: quote.selected_add_ons ?? null,
     selectedTotalDollars: quote.selected_total ?? null,
   });
 

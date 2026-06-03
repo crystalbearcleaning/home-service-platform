@@ -5,44 +5,160 @@ import {
   parseQuoteLineItemsSnapshot,
 } from "./quote-snapshot";
 
-describe("parseQuoteLineItemsSnapshot", () => {
-  it("parses a well-formed Auto-Quote LineItem array (dollars → cents)", () => {
+// The full pricing grid the Phase 1 Auto-Quote Plugin writes into
+// `quotes.line_items_snapshot`: every option + every add-on. The
+// customer picks one option (and optional add-ons); the job should
+// snapshot only the selection, not the whole grid.
+const FULL_PRICING_GRID = [
+  {
+    option_key: "one_time",
+    label: "One-Time Cleaning",
+    amount: 250,
+    kind: "option_exterior",
+  },
+  {
+    option_key: "six_month",
+    label: "Every 6 Months — Exterior",
+    amount: 225,
+    kind: "option_exterior",
+  },
+  {
+    option_key: "three_month",
+    label: "Every 3 Months — Exterior",
+    amount: 200,
+    kind: "option_exterior",
+  },
+  {
+    option_key: "interior_window_cleaning",
+    label: "Interior Window Cleaning",
+    amount: 125,
+    kind: "add_on",
+  },
+];
+
+describe("parseQuoteLineItemsSnapshot — selection filtering (Phase 9E bugfix)", () => {
+  it("copies ONLY the selected option (not every option) when no add-ons are selected", () => {
     const r = parseQuoteLineItemsSnapshot({
-      lineItemsSnapshot: [
-        {
-          option_key: "three_month",
-          label: "Every 3 Months — Exterior",
-          amount: 200,
-          kind: "option_exterior",
-        },
-        {
-          option_key: "interior_window_cleaning",
-          label: "Interior Window Cleaning",
-          amount: 125,
-          kind: "add_on",
-        },
-      ],
+      lineItemsSnapshot: FULL_PRICING_GRID,
+      selectedOptionKey: "three_month",
+      selectedAddOns: [],
+      selectedTotalDollars: 200,
     });
     expect(r.source).toBe("line_items_snapshot");
-    expect(r.warnings).toEqual([]);
-    expect(r.lineItems).toHaveLength(2);
+    expect(r.lineItems).toHaveLength(1);
     expect(r.lineItems[0]).toMatchObject({
       name: "Every 3 Months — Exterior",
       unitPriceCents: 20000,
       totalCents: 20000,
       source: "quote",
-      sortOrder: 0,
-      serviceId: null,
     });
-    expect(r.lineItems[1]).toMatchObject({
-      name: "Interior Window Cleaning",
-      unitPriceCents: 12500,
-      totalCents: 12500,
-      sortOrder: 1,
-    });
+    // No "One-Time", "Every 6 Months", or interior add-on rows.
+    const names = r.lineItems.map((li) => li.name);
+    expect(names).not.toContain("One-Time Cleaning");
+    expect(names).not.toContain("Every 6 Months — Exterior");
+    expect(names).not.toContain("Interior Window Cleaning");
   });
 
-  it("falls back to selected_total + option label when snapshot is missing", () => {
+  it("includes a selected add-on alongside the selected option", () => {
+    const r = parseQuoteLineItemsSnapshot({
+      lineItemsSnapshot: FULL_PRICING_GRID,
+      selectedOptionKey: "three_month",
+      selectedAddOns: [
+        {
+          add_on_key: "interior_window_cleaning",
+          service_id: "svc-abc",
+          price: 125,
+        },
+      ],
+      selectedTotalDollars: 325,
+    });
+    expect(r.source).toBe("line_items_snapshot");
+    expect(r.lineItems).toHaveLength(2);
+    expect(r.lineItems[0]?.name).toBe("Every 3 Months — Exterior");
+    expect(r.lineItems[1]?.name).toBe("Interior Window Cleaning");
+
+    const total = r.lineItems.reduce((sum, li) => sum + li.totalCents, 0);
+    expect(total).toBe(32500);
+    // And matches selected_total when consistent.
+    expect(total).toBe(Math.round(325 * 100));
+  });
+
+  it("omits all add-ons when selectedAddOns is empty (the original bug)", () => {
+    const r = parseQuoteLineItemsSnapshot({
+      lineItemsSnapshot: FULL_PRICING_GRID,
+      selectedOptionKey: "three_month",
+      selectedAddOns: [],
+      selectedTotalDollars: 200,
+    });
+    expect(r.lineItems.map((li) => li.name)).not.toContain(
+      "Interior Window Cleaning",
+    );
+  });
+
+  it("omits all add-ons when selectedAddOns is missing / ambiguous (never include all by default)", () => {
+    const r = parseQuoteLineItemsSnapshot({
+      lineItemsSnapshot: FULL_PRICING_GRID,
+      selectedOptionKey: "six_month",
+      // selectedAddOns intentionally omitted.
+      selectedTotalDollars: 225,
+    });
+    expect(r.source).toBe("line_items_snapshot");
+    expect(r.lineItems).toHaveLength(1);
+    expect(r.lineItems[0]?.name).toBe("Every 6 Months — Exterior");
+  });
+
+  it("accepts selectedAddOns as a bare string-array shape too", () => {
+    const r = parseQuoteLineItemsSnapshot({
+      lineItemsSnapshot: FULL_PRICING_GRID,
+      selectedOptionKey: "one_time",
+      selectedAddOns: ["interior_window_cleaning"],
+      selectedTotalDollars: 375,
+    });
+    expect(r.lineItems).toHaveLength(2);
+    expect(r.lineItems[0]?.name).toBe("One-Time Cleaning");
+    expect(r.lineItems[1]?.name).toBe("Interior Window Cleaning");
+  });
+
+  it("ignores a selectedAddOn whose key has no matching add_on row in the snapshot", () => {
+    const r = parseQuoteLineItemsSnapshot({
+      lineItemsSnapshot: FULL_PRICING_GRID,
+      selectedOptionKey: "one_time",
+      selectedAddOns: [{ add_on_key: "gutter_cleaning", price: 80 }],
+      selectedTotalDollars: 250,
+    });
+    expect(r.lineItems).toHaveLength(1);
+    expect(r.lineItems[0]?.name).toBe("One-Time Cleaning");
+  });
+});
+
+describe("parseQuoteLineItemsSnapshot — fallback paths", () => {
+  it("falls back to selected_total when no selected_option_key is set even though the snapshot has rows", () => {
+    const r = parseQuoteLineItemsSnapshot({
+      lineItemsSnapshot: FULL_PRICING_GRID,
+      // selectedOptionKey intentionally null — the old behaviour was
+      // to blindly copy every row; the fix routes to the safe fallback.
+      selectedOptionKey: null,
+      selectedTotalDollars: 199,
+    });
+    expect(r.source).toBe("selected_total_fallback");
+    expect(r.lineItems).toHaveLength(1);
+    expect(r.lineItems[0]?.unitPriceCents).toBe(19900);
+    expect(r.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("falls back to selected_total when selected_option_key does not match any snapshot row", () => {
+    const r = parseQuoteLineItemsSnapshot({
+      lineItemsSnapshot: FULL_PRICING_GRID,
+      selectedOptionKey: "mystery_option",
+      selectedTotalDollars: 199,
+    });
+    expect(r.source).toBe("selected_total_fallback");
+    expect(r.lineItems).toHaveLength(1);
+    expect(r.lineItems[0]?.unitPriceCents).toBe(19900);
+    expect(r.warnings.length).toBeGreaterThan(0);
+  });
+
+  it("falls back to selected_total + option label when snapshot is null", () => {
     const r = parseQuoteLineItemsSnapshot({
       lineItemsSnapshot: null,
       selectedTotalDollars: 249,
@@ -55,7 +171,6 @@ describe("parseQuoteLineItemsSnapshot", () => {
       ],
     });
     expect(r.source).toBe("selected_total_fallback");
-    // No warning for the clean null-snapshot case (older quotes).
     expect(r.warnings).toEqual([]);
     expect(r.lineItems).toHaveLength(1);
     expect(r.lineItems[0]).toMatchObject({
@@ -76,32 +191,7 @@ describe("parseQuoteLineItemsSnapshot", () => {
     expect(r.lineItems[0]?.unitPriceCents).toBe(19900);
   });
 
-  it("falls back to selected_total when snapshot is empty", () => {
-    const r = parseQuoteLineItemsSnapshot({
-      lineItemsSnapshot: [],
-      selectedTotalDollars: 99,
-    });
-    expect(r.source).toBe("selected_total_fallback");
-    expect(r.lineItems[0]?.unitPriceCents).toBe(9900);
-  });
-
-  it("skips individual unparseable rows but keeps the good ones", () => {
-    const r = parseQuoteLineItemsSnapshot({
-      lineItemsSnapshot: [
-        { label: "Good", amount: 100, kind: "option_exterior" },
-        { label: "", amount: 50, kind: "option_exterior" }, // bad: empty label
-        { label: "Negative", amount: -10 }, // bad: negative amount
-        { label: "Stringy", amount: "$75.50" }, // good: parses
-      ],
-    });
-    expect(r.source).toBe("line_items_snapshot");
-    expect(r.lineItems).toHaveLength(2);
-    expect(r.warnings.length).toBe(2);
-    expect(r.lineItems.map((li) => li.name)).toEqual(["Good", "Stringy"]);
-    expect(r.lineItems[1]?.unitPriceCents).toBe(7550);
-  });
-
-  it("returns 'empty' source when neither snapshot nor selected_total is usable", () => {
+  it("returns 'empty' source when nothing is usable", () => {
     const r = parseQuoteLineItemsSnapshot({
       lineItemsSnapshot: null,
       selectedTotalDollars: null,
@@ -116,6 +206,7 @@ describe("parseQuoteLineItemsSnapshot", () => {
       parseQuoteLineItemsSnapshot({
         lineItemsSnapshot: { not: "an array" } as unknown,
         selectedTotalDollars: "not-a-number",
+        selectedAddOns: { also: "wrong" } as unknown,
       }),
     ).not.toThrow();
   });
@@ -126,7 +217,6 @@ describe("parseQuoteLineItemsSnapshot", () => {
       selectedTotalDollars: "199.99",
     });
     if (r.source !== "selected_total_fallback") throw new Error("expected fallback");
-    // Math.round(199.99 * 100) = 19999
     expect(r.lineItems[0]?.unitPriceCents).toBe(19999);
   });
 });

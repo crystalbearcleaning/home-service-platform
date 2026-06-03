@@ -44,6 +44,11 @@ export type QuoteSnapshotInput = {
   lineItemsSnapshot: unknown;
   optionsSnapshot?: unknown;
   selectedOptionKey?: string | null;
+  // The customer's chosen add-ons, as written by the Phase 1 quote
+  // submission flow. Each entry has at least `add_on_key`; price /
+  // service_id are not used here (we read price from
+  // line_items_snapshot to keep totals consistent).
+  selectedAddOns?: unknown;
   selectedTotalDollars?: number | string | null;
   // Defaults to "Quoted work" when nothing better can be derived.
   fallbackTitle?: string;
@@ -56,21 +61,69 @@ export function parseQuoteLineItemsSnapshot(
 ): ParseQuoteLineItemsResult {
   const warnings: string[] = [];
 
-  // 1) Preferred path — array of {option_key, label, amount, kind}.
-  if (Array.isArray(input.lineItemsSnapshot)) {
+  // 1) Preferred path — pick the selected option (and any selected
+  //    add-ons) out of line_items_snapshot. `line_items_snapshot` is
+  //    the quote's full pricing grid (every option row + every add-on
+  //    row), NOT a list of "work to perform." We must filter by the
+  //    customer's selection before copying into the job snapshot —
+  //    otherwise the job carries every pricing option as a line.
+  const selectedOptionKey =
+    typeof input.selectedOptionKey === "string" && input.selectedOptionKey.trim()
+      ? input.selectedOptionKey.trim()
+      : null;
+  const selectedAddOnKeys = extractSelectedAddOnKeys(input.selectedAddOns);
+
+  if (Array.isArray(input.lineItemsSnapshot) && selectedOptionKey !== null) {
     const items: ParsedQuoteLineItem[] = [];
     let sortOrder = 0;
-    for (const raw of input.lineItemsSnapshot) {
-      const parsed = tryParseLineItemRow(raw, sortOrder);
+
+    // Selected option row (always kind='option_exterior').
+    const optionRow = findMatchingRow(input.lineItemsSnapshot, (r) => {
+      const kind = pickFirstString(r.kind);
+      const key = pickFirstString(r.option_key);
+      return kind === "option_exterior" && key === selectedOptionKey;
+    });
+    if (optionRow) {
+      const parsed = tryParseLineItemRow(optionRow, sortOrder);
       if (parsed) {
         items.push(parsed);
         sortOrder += 1;
       } else {
         warnings.push(
-          "A quote line item could not be parsed and was skipped.",
+          `Selected option ${selectedOptionKey} found in line_items_snapshot but could not be parsed; falling back to selected_total.`,
         );
       }
+    } else {
+      warnings.push(
+        `Selected option ${selectedOptionKey} was not present in line_items_snapshot; falling back to selected_total.`,
+      );
     }
+
+    // Selected add-on rows (kind='add_on' AND option_key in
+    // selected_add_ons set). If selected_add_ons is missing /
+    // unparseable, the set is empty — no add-ons are included. This
+    // is intentional: blindly including every add-on row is the
+    // exact bug Phase 9E shipped with.
+    if (items.length > 0 && selectedAddOnKeys.size > 0) {
+      for (const raw of input.lineItemsSnapshot) {
+        if (!raw || typeof raw !== "object") continue;
+        const r = raw as Record<string, unknown>;
+        const kind = pickFirstString(r.kind);
+        const key = pickFirstString(r.option_key);
+        if (kind !== "add_on") continue;
+        if (!key || !selectedAddOnKeys.has(key)) continue;
+        const parsed = tryParseLineItemRow(r, sortOrder);
+        if (parsed) {
+          items.push(parsed);
+          sortOrder += 1;
+        } else {
+          warnings.push(
+            `Selected add-on ${key} could not be parsed and was skipped.`,
+          );
+        }
+      }
+    }
+
     if (items.length > 0) {
       return {
         lineItems: items,
@@ -78,8 +131,13 @@ export function parseQuoteLineItemsSnapshot(
         source: "line_items_snapshot",
       };
     }
+    // Fall through to selected_total fallback below.
+  } else if (
+    Array.isArray(input.lineItemsSnapshot) &&
+    selectedOptionKey === null
+  ) {
     warnings.push(
-      "Quote line_items_snapshot was empty or contained only unusable entries; falling back to selected_total.",
+      "Quote has line_items_snapshot but no selected_option_key; falling back to selected_total to avoid copying every quote option as a job line.",
     );
   } else if (
     input.lineItemsSnapshot !== null &&
@@ -100,7 +158,7 @@ export function parseQuoteLineItemsSnapshot(
   }
 
   const label = resolveOptionLabel(
-    input.selectedOptionKey ?? null,
+    selectedOptionKey,
     input.optionsSnapshot,
   );
   const fallbackName = label ?? input.fallbackTitle ?? FALLBACK_TITLE;
@@ -110,8 +168,8 @@ export function parseQuoteLineItemsSnapshot(
       {
         name: fallbackName,
         description:
-          input.selectedOptionKey && label
-            ? `Quote option: ${input.selectedOptionKey}`
+          selectedOptionKey && label
+            ? `Quote option: ${selectedOptionKey}`
             : null,
         quantity: 1,
         unitPriceCents: fallbackCents,
@@ -213,6 +271,42 @@ function dollarsToCentsFromNumber(n: number): number | null {
   if (!Number.isFinite(n)) return null;
   if (n < 0) return null;
   return Math.round(n * 100);
+}
+
+// Extracts the set of `add_on_key` values the customer actually
+// picked from the quote's `selected_add_ons` jsonb (see
+// `src/core/quotes/create.ts` → `selectedAddOns` shape). Accepts the
+// canonical `[{add_on_key, service_id, price}]` shape and falls back
+// to a plain string array if the jsonb was stored that way at some
+// point. Returns an empty set on any unknown shape — better to omit
+// add-ons than to add ones the customer didn't pick.
+function extractSelectedAddOnKeys(value: unknown): Set<string> {
+  const out = new Set<string>();
+  if (!Array.isArray(value)) return out;
+  for (const raw of value) {
+    if (typeof raw === "string") {
+      const k = raw.trim();
+      if (k.length > 0) out.add(k);
+      continue;
+    }
+    if (!raw || typeof raw !== "object") continue;
+    const r = raw as Record<string, unknown>;
+    const key = pickFirstString(r.add_on_key, r.option_key, r.key);
+    if (key) out.add(key.trim());
+  }
+  return out;
+}
+
+function findMatchingRow(
+  rows: ReadonlyArray<unknown>,
+  predicate: (row: Record<string, unknown>) => boolean,
+): Record<string, unknown> | null {
+  for (const raw of rows) {
+    if (!raw || typeof raw !== "object") continue;
+    const r = raw as Record<string, unknown>;
+    if (predicate(r)) return r;
+  }
+  return null;
 }
 
 function resolveOptionLabel(
