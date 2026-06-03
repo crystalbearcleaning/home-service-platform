@@ -208,6 +208,50 @@ scope.
 Phase 9 is **complete** — see `docs/PHASE_9_QA_REPORT.md` for the
 sign-off.
 
+Phase 10 is **complete** — see `docs/PHASE_10_QA_REPORT.md` for
+the sign-off.
+
+Phase 11 is the **Invoice + Payment Recording Foundation** phase.
+It adds the billing snapshot layer after Jobs and Schedule:
+three new tables (`invoices` with status enum `draft|unpaid|paid|
+void`, source `job_completion|manual`, snapshot totals +
+`paid_at` + `receipt_sent_at`; `invoice_line_items` with
+optional `job_line_item_id`, name, quantity, `unit_price_cents`,
+`total_cents`, source `job|custom`; `invoice_payments` with
+`amount_cents`, payment method enum `cash|check|card|zelle|
+other`, `paid_at`, notes), the Jobber-style **Complete Job →
+Create Invoice → Record Payment → Mark Receipt Sent** workflow
+(Complete Job confirmation modal copies `job_line_items` into
+`invoice_line_items` as a snapshot — later job edits do not
+silently change the invoice; Mark Paid modal records a payment
+row and recomputes summary fields; Mark Receipt Sent stores a
+manual timestamp), a new **Invoices** entry under the CRM nav
+group, `/admin/invoices` list + `/admin/invoices/[invoiceId]`
+detail with totals + payments table, job-detail integration that
+surfaces existing invoices and discourages duplicates, and
+soft-fail activity rows. Phase 11A is **docs only**. The
+source-of-truth design doc is:
+
+- `docs/PHASE_11_INVOICE_AND_PAYMENT_RECORDING_FOUNDATION.md`
+
+Phase 11 stays narrow: no online payment processing, no Stripe /
+Square / payment-link integration, no customer payment portal,
+no automatic receipt sending, no SMS / email receipt delivery, no
+message-automation outcomes from invoice / payment / receipt
+events, no customer-facing invoice or receipt pages, no PDF
+generation, no taxes, no discounts, no deposits, no refunds, no
+QuickBooks / Xero / accounting sync, no recurring invoices, no
+recurring jobs, no full scheduling changes, no crew / technician
+assignment, no route optimization, no public `/q` changes, no
+simulation-driven invoicing or payment generation, no AI /
+context-engine expansion, no plugin builder / marketplace, no
+data import / export, no multi-currency, and no edit / delete /
+archive flows on `invoices` / `invoice_line_items` /
+`invoice_payments` beyond what Phase 11D/E ships. Phase 11 MAY
+add the three new tables but only inside Phase 11B and only if
+explicitly approved. See §§21–22 of the Phase 11 doc before
+extending scope.
+
 Phase 10 is the **Job Scheduling Foundation** phase. It sits on
 top of Phase 9 Jobs and turns the existing scheduling columns
 (`scheduled_start_at`, `scheduled_end_at`, `arrival_window_label`,
