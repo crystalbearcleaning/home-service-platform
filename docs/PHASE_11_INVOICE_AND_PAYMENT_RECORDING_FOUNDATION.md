@@ -1039,8 +1039,8 @@ above, **stop and ask first.**
 ## 24. Phase 11A Definition of Done
 
 - [x] Source-of-truth doc exists (this file).
-- [ ] `CLAUDE.md` carries a Phase 11 pointer paragraph.
-- [ ] `README.md` Status section names Phase 11 and links to this
+- [x] `CLAUDE.md` carries a Phase 11 pointer paragraph.
+- [x] `README.md` Status section names Phase 11 and links to this
       doc.
 - [x] No app code changed.
 - [x] No business logic changed.
@@ -1050,3 +1050,131 @@ above, **stop and ask first.**
 Phase 11A ends at docs only. Phase 11B is the first step that
 touches code, and it only ships after this doc is reviewed and
 approved.
+
+---
+
+## Appendix A — Phase 11B schema + server foundation (delivered)
+
+**Status:** migration + pure helpers + server-only loaders +
+server-only create / payment / receipt helpers + 54 pure unit
+tests. **Migration not applied** — operator runs `supabase db
+push` when ready. **No UI shipped in Phase 11B.**
+**Added:** 2026-06-03.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `supabase/migrations/20260603130000_phase_11_invoices.sql` | Creates `invoices` + `invoice_line_items` + `invoice_payments` tables, indexes, CHECK constraints (status / source / payment-method enums + non-negative money + positive amount), RLS Pattern B (members SELECT). Single transaction, idempotent `drop policy if exists`. |
+| `src/core/invoices/constants.ts` | Pinned enums + type guards: `INVOICE_STATUSES`, `INVOICE_SOURCES`, `INVOICE_LINE_ITEM_SOURCES`, `PAYMENT_METHODS`. |
+| `src/core/invoices/totals.ts` | Pure: `computeInvoiceLineItemTotal`, `computeInvoiceSubtotal`, `computeInvoiceTotal` (== subtotal in Phase 11), `computeAmountPaid`, `computeInvoiceBalance`, `deriveInvoicePaymentStatus`. Defensive clamping (negative / non-finite → 0). |
+| `src/core/invoices/validation.ts` | Pure: `validateInvoiceForm`, `validateInvoiceLineItemForm`, `validatePaymentForm`, `isReceiptMarkableStatus`. Payment validator includes the overpayment guard (rejects `amountCents > currentBalanceCents`). |
+| `src/core/invoices/display.ts` | Pure: `invoiceStatusLabel` / `invoiceStatusTone`, `invoiceSourceLabel`, `invoiceLineItemSourceLabel`, `paymentMethodLabel`, `receiptDisplay` / `receiptDisplayLabel`. Re-exports `formatCentsAsDollars` from the jobs display helpers. |
+| `src/core/invoices/admin-data.ts` | Server-only loaders: `listInvoices`, `getInvoice`, `getInvoiceLineItems`, `getInvoicePayments`, `listInvoicesForJob`, `listInvoicesForContact`. Joins contact full_name + property address line + job title; clamps limit to [1, 500]; returns `[]` / `null` on any error. |
+| `src/core/invoices/admin-create.ts` | Server-only writers: `createInvoiceFromJob`, `recordInvoicePayment`, `markReceiptSent`. Ordered writes + `recomputeInvoiceTotals` after every mutation. Loads source job via `getJob` + `getJobLineItems` (Phase 9B helpers) to copy line items as a snapshot. |
+| `src/core/invoices/totals.test.ts` | 19 tests pinning total math (line item, subtotal/total, amount paid, balance clamping, derive-status across `unpaid` / `draft` / `paid` / `void` + edge cases). |
+| `src/core/invoices/validation.test.ts` | 25 tests pinning enums + form / line-item / payment / receipt-status validators including the overpayment guard. |
+| `src/core/invoices/display.test.ts` | 10 tests pinning all 4 status labels + tones, both source labels, both line-item source labels, all 5 payment-method labels, formatCentsAsDollars round-trip, receipt-display state machine. |
+| `schema.md` §22g | Documents the three new tables, indexes, CHECKs, RLS Pattern B, status-flip rule. |
+
+### Migration shape
+
+Three new tables added in one migration. CHECKs:
+
+- `invoices.invoice_number` non-empty when present.
+- `invoices.status` in (`draft`, `unpaid`, `paid`, `void`).
+- `invoices.source` in (`job_completion`, `manual`).
+- `invoices.{subtotal_cents, total_cents, amount_paid_cents,
+  balance_cents}` ≥ 0.
+- `invoice_line_items.name` non-empty.
+- `invoice_line_items.quantity` > 0.
+- `invoice_line_items.{unit_price_cents, total_cents}` ≥ 0.
+- `invoice_line_items.source` in (`job`, `custom`).
+- `invoice_payments.amount_cents` > 0.
+- `invoice_payments.payment_method` in (`cash`, `check`, `card`,
+  `zelle`, `other`).
+
+Six indexes on `invoices`, four on `invoice_line_items`, three on
+`invoice_payments`. RLS Pattern B SELECT policy on each.
+
+### Helper behavior
+
+- **Totals.** `computeInvoiceLineItemTotal` rounds `qty × cents`
+  to nearest cent and clamps non-finite / negative. Subtotal +
+  total are sums of `total_cents`. `computeAmountPaid` ignores
+  non-positive payment rows. `computeInvoiceBalance` clamps at
+  zero — overpayment is caught at the validator layer, not by
+  letting the balance go negative.
+- **deriveInvoicePaymentStatus** decides whether to flip
+  `unpaid` / `draft` → `paid` and what `paid_at` to write. `paid`
+  is idempotent; `void` is never auto-flipped; negative balance
+  is treated defensively as zero (i.e. paid). The helper is the
+  testable single source of truth — the writer just applies the
+  decision.
+- **Validation.** Invoice form requires contact + job. Line item
+  validator mirrors the Phase 9B job-line-item validator
+  (name + qty > 0 + price ≥ 0 + integer cents + valid source).
+  Payment validator covers method enum + positive integer amount
+  + paid_at parses + overpayment guard against the supplied
+  `currentBalanceCents`. Notes trimmed to 2000 chars.
+
+### Loader behavior
+
+- Service-role + business-scoped + read-only.
+- Joins pull contact `full_name`, property `address_line_1, city,
+  state`, job `title`, and (for line items) service `name`.
+- All loaders return `[]` / `null` on missing input or DB error
+  (matches Phase 9/10 posture).
+- Payments are sorted `paid_at desc`; line items by `sort_order
+  nulls last, created_at asc`.
+
+### Writer behavior
+
+- **`createInvoiceFromJob`** — verifies the job belongs to the
+  business via `getJob`, loads `job_line_items`, inserts the
+  parent `invoices` row with zeroed summary, bulk-inserts copied
+  line items (`source='job'`, `job_line_item_id` preserved), then
+  recomputes the summary from the freshly inserted rows.
+  Snapshot semantics (§6 of the Phase 11 doc): later edits to
+  `job_line_items` do NOT silently rewrite the invoice. Defaults
+  `source='job_completion'`, `status='unpaid'`.
+- **`recordInvoicePayment`** — loads the invoice summary,
+  rejects payments on `void` invoices, runs the validator
+  (including the overpayment guard against the live balance),
+  inserts an `invoice_payments` row, recomputes the summary, and
+  applies the `deriveInvoicePaymentStatus` decision (status flip
+  + `paid_at`) only when something actually changed.
+- **`markReceiptSent`** — requires status `paid`; sets
+  `receipt_sent_at` to the supplied ISO string or `now()`.
+
+### Atomicity
+
+Phase 11B follows the Phase 5B / 7D-1 / 8B / 9B pattern: ordered
+writes + recompute. Acceptable trade-off: a partial commit (e.g.
+parent row landed but line item insert failed) returns an error
+but leaves the parent row behind. Real-usage incidents would
+motivate promoting to a Postgres RPC; none are introduced here.
+
+### What Phase 11B deliberately does NOT do
+
+- No UI — no `/admin/invoices` page, no CRM nav entry, no
+  server actions wired to forms.
+- No `activities` / `events` / `notes` writes (deferred to Phase
+  11D/E).
+- No message-engine calls; no customer notifications.
+- No payment-processor / Stripe / Square integration.
+- No refund / void server actions.
+- No edit / delete UI for invoices, line items, or payments.
+- No Postgres RPC. Ordered writes + recompute matches existing
+  patterns.
+- No simulation-driven invoicing.
+- No public `/q` change.
+- No changes to `jobs` / `contacts` / `properties` / `services`
+  schema.
+
+### Not applied
+
+The migration is **created but not applied**. Operator runs
+`supabase db push` when ready. Re-applying is safe in dev
+(`create table` is the standard pattern; `CREATE POLICY` is
+preceded by `DROP POLICY IF EXISTS`).

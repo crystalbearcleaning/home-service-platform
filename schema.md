@@ -1409,6 +1409,145 @@ the Phase 9D manual flow and the Phase 9E quote-to-job conversion.
 
 ---
 
+## 22g. Invoices + Invoice Line Items + Invoice Payments (Phase 11B)
+
+Phase 11B introduces the **billing snapshot** layer after Jobs +
+Schedule. Three new tables, all `business_id`-scoped with RLS
+Pattern B. No payment-processor integration, no refund table, no
+taxes / discounts / deposits columns, no receipt-template tables,
+no customer-facing public columns in Phase 11.
+
+Source of truth:
+`docs/PHASE_11_INVOICE_AND_PAYMENT_RECORDING_FOUNDATION.md`
+§§20–21.
+
+### `invoices`
+
+One row per billing snapshot. Created from a completed job (via
+the Phase 11D Complete Job confirmation modal) or manually from
+the job detail page fallback. **Every invoice anchors to a job**
+— no free-floating invoices in Phase 11.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `uuid` | PK, default `gen_random_uuid()` | |
+| `business_id` | `uuid` | NOT NULL, FK → `businesses(id)` ON DELETE CASCADE | Scope + RLS. |
+| `contact_id` | `uuid` | NOT NULL, FK → `contacts(id)` ON DELETE CASCADE | Copied from the source job. |
+| `property_id` | `uuid` | NULLABLE, FK → `properties(id)` ON DELETE SET NULL | Copied from the source job. |
+| `job_id` | `uuid` | NOT NULL, FK → `jobs(id)` ON DELETE CASCADE | The source job. Not unique; a job may have multiple invoices over time (§6). |
+| `invoice_number` | `text` | NULLABLE, CHECK non-empty when present | Human-friendly id. Auto-numbering deferred to Phase 11F. |
+| `status` | `text` | NOT NULL default `'unpaid'`, CHECK in (`draft`, `unpaid`, `paid`, `void`) | Plain text enum; status flips `unpaid → paid` automatically when balance hits zero. |
+| `source` | `text` | NOT NULL default `'job_completion'`, CHECK in (`job_completion`, `manual`) | Drives display + activity. |
+| `subtotal_cents` | `bigint` | NOT NULL default `0`, CHECK ≥ 0 | App-maintained snapshot. |
+| `total_cents` | `bigint` | NOT NULL default `0`, CHECK ≥ 0 | Phase 11 = `subtotal_cents`. |
+| `amount_paid_cents` | `bigint` | NOT NULL default `0`, CHECK ≥ 0 | App-maintained snapshot of `sum(invoice_payments.amount_cents)`. |
+| `balance_cents` | `bigint` | NOT NULL default `0`, CHECK ≥ 0 | App-maintained `total_cents - amount_paid_cents`. Overpayment is rejected at the action layer (§12 of the Phase 11 doc); the DB CHECK is the safety net. |
+| `paid_at` | `timestamptz` | NULLABLE | Set when status flips `unpaid → paid`. |
+| `receipt_sent_at` | `timestamptz` | NULLABLE | Manual operator timestamp; Phase 11E "Mark Receipt Sent" action sets it. No SMS/email/automation. |
+| `created_at` / `updated_at` | `timestamptz` | standard | |
+
+**Indexes:**
+- `(business_id)`
+- `(business_id, status)`
+- `(business_id, created_at desc)`
+- `(business_id, paid_at)` — "paid in the last X" queries
+- `(contact_id)` — contact-hub invoices list
+- `(job_id)` — job-detail invoices section
+
+**RLS:** Pattern B. Authenticated members may `SELECT`; INSERT /
+UPDATE / DELETE go through the Phase 11B server helpers
+(`src/core/invoices/admin-create.ts`) using the service-role
+client.
+
+### `invoice_line_items`
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `uuid` | PK, default `gen_random_uuid()` | |
+| `business_id` | `uuid` | NOT NULL, FK → `businesses(id)` ON DELETE CASCADE | |
+| `invoice_id` | `uuid` | NOT NULL, FK → `invoices(id)` ON DELETE CASCADE | |
+| `job_line_item_id` | `uuid` | NULLABLE, FK → `job_line_items(id)` ON DELETE SET NULL | Traceability to the source job line. |
+| `service_id` | `uuid` | NULLABLE, FK → `services(id)` ON DELETE SET NULL | Copied from the source line when set. |
+| `name` | `text` | NOT NULL, CHECK non-empty | Human label. |
+| `description` | `text` | NULLABLE | Optional notes. |
+| `quantity` | `numeric(10,2)` | NOT NULL default `1`, CHECK > 0 | |
+| `unit_price_cents` | `bigint` | NOT NULL, CHECK ≥ 0 | |
+| `total_cents` | `bigint` | NOT NULL, CHECK ≥ 0 | App-computed `round(quantity * unit_price_cents)`. |
+| `sort_order` | `integer` | NULLABLE | Render order. NULL = end. |
+| `source` | `text` | NOT NULL, CHECK in (`job`, `custom`) | Phase 11 primarily uses `job`; `custom` reserved for a future "add line item to invoice" path. |
+| `created_at` / `updated_at` | `timestamptz` | standard | |
+
+**Indexes:**
+- `(business_id)`
+- `(business_id, invoice_id)`
+- `(invoice_id, sort_order asc nulls last, created_at asc)`
+- `(job_line_item_id)` — traceability
+
+**RLS:** Pattern B.
+
+### `invoice_payments`
+
+Append-only audit trail. No edit / delete UI in Phase 11.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `uuid` | PK, default `gen_random_uuid()` | |
+| `business_id` | `uuid` | NOT NULL, FK → `businesses(id)` ON DELETE CASCADE | |
+| `invoice_id` | `uuid` | NOT NULL, FK → `invoices(id)` ON DELETE CASCADE | |
+| `amount_cents` | `bigint` | NOT NULL, CHECK > 0 | Refunds / negative rows are out of scope. |
+| `payment_method` | `text` | NOT NULL, CHECK in (`cash`, `check`, `card`, `zelle`, `other`) | No payment-processor integration in Phase 11. |
+| `paid_at` | `timestamptz` | NOT NULL | Operator-supplied; defaults to `now()` in the modal. |
+| `notes` | `text` | NULLABLE | Check number, confirmation hash, etc. |
+| `created_at` | `timestamptz` | standard | No `updated_at` — payments are append-only. |
+
+**Indexes:**
+- `(business_id)`
+- `(business_id, invoice_id)`
+- `(business_id, paid_at desc)`
+
+**RLS:** Pattern B.
+
+### Line items + payments are the source of truth for invoice totals
+
+`invoices.{subtotal_cents, total_cents, amount_paid_cents,
+balance_cents}` are maintained **snapshots** of the underlying
+sums. Every Phase 11B server helper that touches line items or
+payments calls `recomputeInvoiceTotals(businessId, invoiceId)` in
+the same handler. The DB CHECKs (`*_cents >= 0`,
+`balance_cents >= 0`) are the safety net. The application code is
+the source of truth.
+
+### Status flip rule
+
+After a payment lands, the pure helper
+`deriveInvoicePaymentStatus` (in `src/core/invoices/totals.ts`)
+decides whether to flip `unpaid` / `draft` → `paid` and set
+`paid_at` to the payment's `paid_at`. `paid` stays `paid`; `void`
+never auto-flips. The action layer enforces the same rule the
+helper expresses; the helper is the testable single source of
+truth.
+
+### What Phase 11B does NOT add
+
+- No payment-processor / Stripe / Square / payment-link tables.
+- No `invoice_refunds` table.
+- No taxes / discounts / deposits / surcharges columns.
+- No `due_at` / `overdue_at` columns.
+- No `sent_at` / email / SMS receipt-delivery columns (only the
+  manual `receipt_sent_at`).
+- No QuickBooks / Xero / accounting-sync columns.
+- No customer-facing / public-token columns.
+- No changes to `jobs` / `contacts` / `properties` / `services`.
+- No unique constraint on `(job_id)` — a job may have multiple
+  invoices (§6, §16 of the Phase 11 doc).
+
+Each belongs to a future foundation phase.
+
+**Phase 11B does NOT seed any rows** — operators create invoices
+through the Phase 11D Complete Job flow and the manual fallback.
+
+---
+
 ## 23. Deferred Tables
 
 Do not implement these in Phase 1 unless explicitly re-scoped later:
