@@ -1067,3 +1067,138 @@ without an extra round trip. **No new join columns.**
   `listScheduledJobsForWeek`) but don't block new scheduling.
 - **Loaders return `[]` on error** (no throw). Matches the
   existing `listJobs` / `getJob` / `listJobsForContact` posture.
+
+---
+
+## Appendix B — Phase 10C `/admin/schedule` read-only week view (delivered)
+
+**Status:** Operations nav group + `Schedule` entry ship, the
+`/admin/schedule` page renders a Mon–Fri week calendar (8 AM–6 PM
+visible band), an unscheduled-jobs panel, an outside-hours +
+weekend list, week navigation (`?week=YYYY-MM-DD`), and links from
+each card to `/admin/jobs/[jobId]`. **No mutations, no modals, no
+drag/drop.** The Schedule button on unscheduled cards is a
+disabled "Coming next" affordance — the real action lands in
+Phase 10D. **No schema changes.** **Added:** 2026-06-02.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/components/admin/nav-config.ts` | Added a new top-level **Operations** group between Tasks and Marketing (Phase 10 doc §13 Option A). Single entry: **Schedule** → `/admin/schedule`, icon `calendar`. |
+| `src/components/admin/nav-config.test.ts` | Updated `exposes the Phase X group order` test to expect `Operations` between Tasks and Marketing; added an `Operations group contains exactly Schedule` test. |
+| `src/components/admin/icons.tsx` | Added a `calendar` icon (outline 24×24 with a small header bar and two tab marks). |
+| `src/app/admin/schedule/page.tsx` | Server Component. Resolves auth + active business + admin shell context. Parses `?week=YYYY-MM-DD` via `parseWeekKey`; falls back to the effective-today week. Loads `listScheduledJobsForWeek` + `listUnscheduledJobs` in parallel. Classifies scheduled jobs into visible / outside-hours / weekend, renders the grid + the outside-hours list + the unscheduled panel. Renders a soft "No active simulation save — schedule uses real time." notice when the workspace is simulation and no active save exists. |
+| `src/app/admin/schedule/week-nav.tsx` | Server component. Renders **Prev / Today / Next** links (route via `?week=...`), the visible week range label, and a small "today is …" hint when the operator is viewing a non-today week. |
+| `src/app/admin/schedule/schedule-views.tsx` | Server components: `ScheduleWeekGrid`, `ScheduledJobCard`, `classifyScheduledJobs`, `OutsideHoursList`, `UnscheduledJobsPanel`. All read-only; no mutations. Calendar position math uses Phase 10B's `calculateCalendarPosition`. |
+| `src/app/admin/schedule/schedule-views.test.ts` | 4 pure tests pinning the `classifyScheduledJobs` routing: weekday-visible band, weekday-outside-hours, Sat + Sun weekend (regardless of hour), null / invalid start skipping. |
+
+### Nav behavior
+
+- Nav now contains 10 groups (was 9): `Overview / CRM / Tasks /
+  **Operations** / Marketing / Simulation / Automations / Plugins
+  / Observability / Tools`.
+- Operations contains exactly **Schedule** → `/admin/schedule`,
+  using the new `calendar` icon.
+- `resolveActiveNavHref` (longest-prefix) already covers
+  `/admin/schedule` correctly — no additional code.
+
+### Effective-today / week navigation
+
+- **Real workspace** → `today = new Date()`.
+- **Simulation workspace + active save** →
+  `today = new Date(shell.simulationBanner.activeRun.simulatedCurrentAt)`.
+  The shell context already loads the active run via
+  `resolveAdminShellContext` (Phase 6D), so no new resolver is
+  added in Phase 10C.
+- **Simulation workspace without active save** → falls back to
+  real `new Date()`, with a soft warning banner above the week
+  nav: *"No active simulation save — schedule uses real time."*
+- Visible week resolves from `?week=YYYY-MM-DD` via
+  `parseWeekKey`; malformed / missing values fall back to today's
+  week. Prev / Next shift by ±7 days; Today links to the
+  effective-today week.
+
+### Week grid behavior
+
+- Mon–Fri only in the main grid.
+- Visible band 8 AM–6 PM (`SCHEDULE_VISIBLE_START_HOUR` to
+  `SCHEDULE_VISIBLE_END_HOUR`), with hourly gridlines.
+- Card placement uses Phase 10B's `calculateCalendarPosition`
+  (topPct / heightPct clamped to `[0, 100]`).
+- Each card shows: status badge, job title, contact name,
+  scheduling-range summary. Clicking the card opens
+  `/admin/jobs/[jobId]`.
+- Completed jobs render with reduced opacity (visually distinct
+  per §10).
+- Status legend: `scheduled` / `in_progress` / `completed` all
+  show; `canceled` is filtered out by `listScheduledJobsForWeek`;
+  `draft` / `unscheduled` live in the panel.
+
+### Outside-hours / weekend list
+
+- Whenever a scheduled job has `pos.isOutsideVisibleHours === true`
+  (or `pos.heightPct === 0`), it lands in the **Outside 8 AM–6
+  PM** list below the grid — never silently hidden.
+- Sat / Sun jobs land in the **Weekend** list below the grid.
+- Both lists link each row to the job detail page.
+
+### Unscheduled jobs panel
+
+- Right column on large screens; stacked below on small screens.
+- Cards show title, contact, property line (when available),
+  source badge, status badge, estimated total, and a disabled
+  **Schedule · Coming next** affordance (the real action lands in
+  Phase 10D — the brief authorises the placeholder).
+- Empty state: *"All caught up. Create a job or convert a quote
+  to add work to the schedule."*
+
+### Tests / gates
+
+- 4 new `classifyScheduledJobs` tests.
+- 2 new nav-config tests pinning the Operations placement +
+  Schedule entry; 1 existing test was renamed to reflect the
+  new group order.
+- Targeted: `nav-config.test.ts` (25) + `schedule-views.test.ts`
+  (4) + `scheduling.test.ts` (37) → **66 / 66**.
+- `npx tsc --noEmit` clean.
+- `npm run test` → **692 / 692** across 60 files (was 687/687 ×
+  59 at Phase 10B close).
+- `npm run lint` clean.
+- `npm run build` green; `/admin/schedule` lands at 217 B + 148
+  kB shared.
+
+### What Phase 10C deliberately does NOT do
+
+- **No mutations.** No `scheduleJobAction` /
+  `rescheduleJobAction` / `unscheduleJobAction` — those land in
+  Phase 10D.
+- **No modals.** The Schedule button on unscheduled cards is a
+  disabled placeholder.
+- **No drag/drop.**
+- **No reschedule / unschedule action on scheduled cards.**
+- **No conflict warning** (the overlap helper exists from Phase
+  10B; the warning UX wires up in Phase 10D).
+- **No crew / technician assignment.**
+- **No `activities` writes** (Phase 10D will soft-fail write
+  `job.scheduled` / `job.rescheduled` / `job.unscheduled`).
+- **No external calendar sync / customer notifications.**
+- **No public `/q` changes.**
+- **No new database table or column.**
+- **No new SQL migration.**
+- **Day / month / agenda views** remain out of scope.
+
+### Assumptions
+
+- The Phase 6D `resolveAdminShellContext` already loads the
+  active simulation run when the workspace is a simulation
+  workspace, so Phase 10C reuses it directly instead of adding a
+  new server resolver.
+- The Phase 10B `calculateCalendarPosition` is the single source
+  of truth for card top/height + outside-hours flagging — the
+  page's `classifyScheduledJobs` calls it once per job and
+  routes the result.
+- Bundle-size baseline at `/admin/schedule` (217 B) is comparable
+  to other Server-Component-only admin pages; the absolutely-
+  positioned grid is pure CSS + Tailwind tokens — no calendar
+  library was introduced.

@@ -19,12 +19,13 @@ describe("resolveAdminNav", () => {
     expect(withoutHrefs).not.toContain("/admin/staging-tools");
   });
 
-  it("exposes the Phase 6 group order (Simulation inserted between Marketing and Automations)", () => {
+  it("exposes the Phase 10 group order (Operations inserted between Tasks and Marketing)", () => {
     const groups = resolveAdminNav({ stagingToolsEnabled: false });
     expect(groups.map((g) => g.label)).toEqual([
       "Overview",
       "CRM",
       "Tasks",
+      "Operations",
       "Marketing",
       "Simulation",
       "Automations",
@@ -32,6 +33,13 @@ describe("resolveAdminNav", () => {
       "Observability",
       "Tools",
     ]);
+  });
+
+  it("Operations group contains exactly Schedule", () => {
+    const groups = resolveAdminNav({ stagingToolsEnabled: false });
+    const ops = groups.find((g) => g.label === "Operations");
+    expect(ops).toBeDefined();
+    expect(ops?.items.map((i) => i.href)).toEqual(["/admin/schedule"]);
   });
 
   it("Simulation group contains Saves + Play (in that order)", () => {

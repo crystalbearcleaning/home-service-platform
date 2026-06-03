@@ -69,6 +69,16 @@ const RAW_NAV: AdminNavGroup[] = [
     ],
   },
   {
+    label: "Operations",
+    items: [
+      {
+        label: "Schedule",
+        href: "/admin/schedule",
+        icon: "calendar",
+      },
+    ],
+  },
+  {
     label: "Marketing",
     items: [
       {

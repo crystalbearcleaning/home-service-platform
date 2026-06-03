@@ -22,7 +22,8 @@ export type AdminIconKey =
   | "broadcast"
   | "megaphone"
   | "flask"
-  | "briefcase";
+  | "briefcase"
+  | "calendar";
 
 type IconProps = SVGProps<SVGSVGElement> & { size?: number };
 
@@ -144,6 +145,14 @@ const ICONS: Record<AdminIconKey, (props: IconProps) => React.ReactElement> = {
       <rect x="3" y="7" width="18" height="13" rx="2" />
       <path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" />
       <path d="M3 13h18" />
+    </Base>
+  ),
+  calendar: (p) => (
+    <Base {...p}>
+      <rect x="3" y="5" width="18" height="16" rx="2" />
+      <path d="M3 10h18" />
+      <path d="M8 3v4" />
+      <path d="M16 3v4" />
     </Base>
   ),
 };
