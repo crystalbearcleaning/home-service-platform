@@ -935,8 +935,8 @@ Adjust the split if implementation review surfaces a safer order.
 ## 18. Phase 10A Definition of Done
 
 - [x] Source-of-truth doc exists (this file).
-- [ ] `CLAUDE.md` carries a Phase 10 pointer paragraph.
-- [ ] `README.md` Status section names Phase 10 and links to this
+- [x] `CLAUDE.md` carries a Phase 10 pointer paragraph.
+- [x] `README.md` Status section names Phase 10 and links to this
       doc.
 - [x] No app code changed.
 - [x] No business logic changed.
@@ -946,3 +946,124 @@ Adjust the split if implementation review surfaces a safer order.
 Phase 10A ends at docs only. Phase 10B is the first step that
 touches code, and it only ships after this doc is reviewed and
 approved.
+
+---
+
+## Appendix A — Phase 10B scheduling helpers + server foundation (delivered)
+
+**Status:** pure scheduling helpers + two server-only loaders + 37
+pure unit tests. **No UI, no nav entry, no server actions, no
+schema changes** in Phase 10B. **Added:** 2026-06-02.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/core/jobs/scheduling.ts` | Pure helpers: `getWeekRange`, `formatWeekKey`, `parseWeekKey`, `enumerateWeekDays`, `groupJobsByDay`, `calculateCalendarPosition`, `detectScheduleOverlaps`, `combineDateAndTimeToISO`, `defaultEndForStart`. Plus constants `SCHEDULE_VISIBLE_DAYS`, `SCHEDULE_VISIBLE_START_HOUR=8`, `SCHEDULE_VISIBLE_END_HOUR=18`, `SCHEDULE_DEFAULT_DURATION_MINUTES=60`. All local-time math via JS Date constructors — matches the existing `datetime-local` boundary in `src/app/admin/jobs/[jobId]/scheduling-form.tsx`. |
+| `src/core/jobs/scheduling.test.ts` | 37 pure tests pinning every helper (week range from Mon/Sat/Sun/Wed references, week-key round-trip + malformed input, weekday/weekend grouping + week-edge exclusivity, calendar position inside / before / after / partial / nonsensical-grid cases, overlap detection: start/end/contained/exact-edge/exclude/status-filter/in_progress/missing-end on both sides/null+invalid input, combineDateAndTime malformed cases including 2026-02-31 overflow, defaultEndForStart custom + invalid duration, default-duration constant). |
+| `src/core/jobs/admin-data.ts` | **Added** two server-only loaders: `listScheduledJobsForWeek({ businessId, weekStart, weekEnd, limit? })` (status in [`scheduled`, `in_progress`, `completed`], scheduled_start_at in `[weekStart, weekEnd)`, ascending) and `listUnscheduledJobs({ businessId, limit? })` (scheduled_start_at IS NULL, status in [`draft`, `unscheduled`], created_at DESC). Both reuse the existing `JOB_SELECT` join (contact full_name + property address line) and the `clampLimit` cap (default 100 / max 500). New private `coerceIso` helper accepts Date or ISO string. |
+
+### Helper behavior
+
+- **`getWeekRange`** — Monday-start, local-time Date constructor.
+  `start` at 00:00:00.000 on Monday; `end` at 00:00:00.000 on the
+  following Monday (exclusive). `weekKey` is `YYYY-MM-DD` of
+  `start` in local time. Fallback reference = `new Date()` when
+  the argument is missing/invalid.
+- **`parseWeekKey`** — accepts only `YYYY-MM-DD`; rejects overflow
+  (`2026-02-31` → null) and month/day out of range.
+- **`groupJobsByDay`** — buckets by local-time date key; lower
+  bound inclusive, upper bound exclusive; null / invalid /
+  out-of-window jobs are skipped silently.
+- **`calculateCalendarPosition`** — visible band defaults 8 AM–6
+  PM (`SCHEDULE_VISIBLE_*`). Pure pct math; `topPct` /
+  `heightPct` always clamped to `[0, 100]`. Flags
+  `startsBeforeVisible`, `endsAfterVisible`,
+  `isOutsideVisibleHours`. Returns `null` for missing/invalid
+  start OR nonsensical grid settings (e.g. visibleEnd ≤
+  visibleStart). Falls back to `start + defaultDurationMinutes`
+  when `scheduled_end_at` is null or ≤ start.
+- **`detectScheduleOverlaps`** — half-open overlap check
+  (`existing.start < proposed.end && existing.end > proposed.start`).
+  Only `scheduled` and `in_progress` candidates count;
+  `completed` / `canceled` / `draft` / `unscheduled` are skipped.
+  Missing ends on either side default to 60 minutes. `excludeJobId`
+  excludes the current job. Empty `existingJobs` → `[]`. Empty
+  result = safe to commit.
+- **`combineDateAndTimeToISO`** — `YYYY-MM-DD` + `HH:MM` →
+  local-time ISO. Rejects malformed inputs + overflow.
+- **`defaultEndForStart`** — `startISO + N minutes` → ISO.
+  Negative / non-finite durations fall back to 60.
+
+### Loader behavior
+
+- **`listScheduledJobsForWeek`** — service-role, business-scoped,
+  read-only. Filters status in [`scheduled`, `in_progress`,
+  `completed`] (canceled is hidden everywhere on the schedule
+  page; draft + unscheduled live in the unscheduled panel).
+  Window is half-open: `>= weekStart` and `< weekEnd`. ISO
+  conversion happens at the boundary via the new `coerceIso`
+  helper. Returns `[]` on missing inputs or DB error.
+- **`listUnscheduledJobs`** — service-role, business-scoped,
+  read-only. `scheduled_start_at IS NULL` AND status in
+  [`draft`, `unscheduled`]. Most-recent-first. Returns `[]` on
+  missing input or DB error.
+
+Both loaders reuse the existing `JOB_SELECT` join (contact
+`full_name` + property `address_line_1, city, state`) so the
+schedule UI can render scheduled cards + unscheduled panel cards
+without an extra round trip. **No new join columns.**
+
+### Tests / gates
+
+- 37 new scheduling tests.
+- Targeted: `npx vitest run src/core/jobs/scheduling.test.ts` →
+  **37/37**.
+- `npx tsc --noEmit` clean.
+- `npm run test` → **687/687** across 59 files (was 650/650 × 58
+  at Phase 9 close — Phase 10B adds 37 + 0 net file count went
+  from 58 → 59).
+- `npm run lint` clean.
+- `npm run build` green; bundle sizes for existing routes
+  unchanged (no UI added).
+
+### What Phase 10B deliberately does NOT do
+
+- No `/admin/schedule` page or any UI surface.
+- No nav entry (`Schedule` lands in Phase 10C alongside the
+  page).
+- No new icon.
+- No server actions — `scheduleJobAction` / `rescheduleJobAction`
+  / `unscheduleJobAction` land in Phase 10D.
+- No modal / form components.
+- No drag/drop wiring.
+- No crew / technician assignment.
+- No route optimization, no drive-time math.
+- No Google Calendar (or any external calendar) sync.
+- No customer notifications, no SMS, no email — the message
+  engine is not even reached.
+- No recurring job logic.
+- No invoices / payments.
+- No simulation-driven schedule generation.
+- No reference-time / `simulated_current_at` resolver. This
+  belongs alongside the page loader in Phase 10C; the brief
+  authorises deferring it.
+- No public `/q` changes.
+- **No schema changes, no migration, no new column on `jobs`.**
+- No `activities` writes (Phase 10D will soft-fail-write
+  `job.scheduled` / `job.rescheduled` / `job.unscheduled` rows
+  inside the actions).
+
+### Assumptions
+
+- **Local-time semantics**: all pure date math uses JS Date
+  constructors against the operator's local timezone — matching
+  the existing Phase 9D `<SchedulingForm>` `datetime-local`
+  boundary. Tests build expected values the same way so they're
+  timezone-independent.
+- **Statuses in conflict candidates**: `scheduled` + `in_progress`
+  only. Phase 10 doc §11 + the brief both pin this. Completed
+  jobs in the visible week still render on the calendar (via
+  `listScheduledJobsForWeek`) but don't block new scheduling.
+- **Loaders return `[]` on error** (no throw). Matches the
+  existing `listJobs` / `getJob` / `listJobsForContact` posture.

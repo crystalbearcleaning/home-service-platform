@@ -142,6 +142,61 @@ export async function listJobsForQuote(input: {
   return data.map(rowToJob);
 }
 
+// -------------------------------------------------------------------------
+// Phase 10B — schedule-page loaders
+// -------------------------------------------------------------------------
+
+// Returns scheduled / in-progress / completed jobs whose
+// `scheduled_start_at` falls in `[weekStart, weekEnd)`. The status
+// filter mirrors §10 of `docs/PHASE_10_JOB_SCHEDULING_FOUNDATION.md`:
+// draft + unscheduled live in the unscheduled panel, canceled is
+// hidden everywhere on the schedule page.
+export async function listScheduledJobsForWeek(input: {
+  businessId: string;
+  weekStart: Date | string;
+  weekEnd: Date | string;
+  limit?: number;
+}): Promise<JobRow[]> {
+  if (!input.businessId) return [];
+  const startIso = coerceIso(input.weekStart);
+  const endIso = coerceIso(input.weekEnd);
+  if (!startIso || !endIso) return [];
+  const sb = createServiceRoleClient();
+  const { data, error } = await sb
+    .from("jobs")
+    .select(JOB_SELECT)
+    .eq("business_id", input.businessId)
+    .not("scheduled_start_at", "is", null)
+    .gte("scheduled_start_at", startIso)
+    .lt("scheduled_start_at", endIso)
+    .in("status", ["scheduled", "in_progress", "completed"])
+    .order("scheduled_start_at", { ascending: true })
+    .limit(clampLimit(input.limit));
+  if (error || !data) return [];
+  return data.map(rowToJob);
+}
+
+// Returns unscheduled-panel candidates: jobs with no
+// `scheduled_start_at` and a `draft` / `unscheduled` status. Most-
+// recent-first. Same default-100 / max-500 cap as `listJobs`.
+export async function listUnscheduledJobs(input: {
+  businessId: string;
+  limit?: number;
+}): Promise<JobRow[]> {
+  if (!input.businessId) return [];
+  const sb = createServiceRoleClient();
+  const { data, error } = await sb
+    .from("jobs")
+    .select(JOB_SELECT)
+    .eq("business_id", input.businessId)
+    .is("scheduled_start_at", null)
+    .in("status", ["draft", "unscheduled"])
+    .order("created_at", { ascending: false })
+    .limit(clampLimit(input.limit));
+  if (error || !data) return [];
+  return data.map(rowToJob);
+}
+
 export async function listJobsForContact(input: {
   businessId: string;
   contactId: string;
@@ -252,4 +307,17 @@ function clampLimit(raw: number | null | undefined): number {
   if (n <= 0) return LIST_DEFAULT_LIMIT;
   if (n > LIST_MAX_LIMIT) return LIST_MAX_LIMIT;
   return n;
+}
+
+function coerceIso(v: Date | string | null | undefined): string | null {
+  if (v instanceof Date) {
+    if (Number.isNaN(v.getTime())) return null;
+    return v.toISOString();
+  }
+  if (typeof v === "string" && v.length > 0) {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return null;
+    return d.toISOString();
+  }
+  return null;
 }
