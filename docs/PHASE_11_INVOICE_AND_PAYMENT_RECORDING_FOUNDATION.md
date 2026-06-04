@@ -1458,3 +1458,182 @@ underlying mutation):
   pattern (`router.refresh()`) is used by mutations that keep
   the operator on the same page; creation flows that produce a
   new entity navigate to it.
+
+---
+
+## Appendix D — Phase 11E Mark Paid + Mark Receipt Sent (delivered)
+
+**Status:** the money loop closes. Invoice detail now ships a
+**Mark Paid** modal that records a payment row + recomputes
+summary fields + flips status to `paid` when balance hits zero,
+plus a **Mark Receipt Sent** button that stores a manual
+timestamp. Both compose the Phase 11B server helpers. Three
+soft-fail activity types ship. **No online payments, no receipt
+sending, no SMS/email, no customer notifications, no schema
+changes.** **Added:** 2026-06-03.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `src/core/invoices/eligibility.ts` | Pure UI helpers: `isMarkPaidEligible({ status, balanceCents })` (true for `draft` / `unpaid` AND `balance > 0`), `isMarkReceiptSentEligible({ status, receiptSentAtIso })` (true only when `status === 'paid'` AND `receipt_sent_at` is null). |
+| `src/core/invoices/eligibility.test.ts` | 9 pure tests pinning both helpers across all status / balance combinations. |
+| `src/app/admin/invoices/actions.ts` | Two server actions: `recordInvoicePaymentAction` and `markReceiptSentAction`. Both re-verify business ownership via `getInvoice`, delegate to the Phase 11B `recordInvoicePayment` / `markReceiptSent` helpers, write soft-fail `createActivity` rows, and revalidate `/admin/invoices`, `/admin/invoices/[invoiceId]`, and `/admin/jobs/[jobId]` (when the invoice has a `job_id`). |
+| `src/app/admin/invoices/[invoiceId]/mark-paid-button.tsx` | Client component. Renders an accent-colored **Mark paid** button + modal with `Amount (USD)` dollar input (defaults to formatted balance), `Payment method` select (cash / check / card / zelle / other, default cash), `Paid at` datetime-local (default now), and `Notes` textarea. Submit → `recordInvoicePaymentAction` → `router.refresh()` on success. |
+| `src/app/admin/invoices/[invoiceId]/mark-receipt-sent-button.tsx` | Client component. Outlined button + `window.confirm` ("Mark receipt as sent? This only records that you sent it manually. It will not send an email or text.") → `markReceiptSentAction` → `router.refresh()`. |
+| `src/app/admin/invoices/[invoiceId]/page.tsx` | Wires both buttons into the Summary section below the KV strip + paid_at/receipt_sent_at row. Uses `isMarkPaidEligible` / `isMarkReceiptSentEligible` to decide which (if any) to render. Updates the payments empty-state copy to point at the new Mark Paid affordance. |
+
+### Mark Paid modal behavior
+
+- Trigger renders only when `isMarkPaidEligible` returns true
+  (`draft` / `unpaid` AND `balance_cents > 0`).
+- Modal pre-fills:
+  - `amount` → `balance_cents` formatted as `"NN.NN"` dollars.
+  - `payment_method` → `cash`.
+  - `paid_at` → operator's local now (`datetime-local` format).
+  - `notes` → blank.
+- Submit calls `recordInvoicePaymentAction`. The action:
+  - Parses `amountDollars` via the existing
+    `parseDollarsToCents` helper (`NEGATIVE` / `NOT_A_NUMBER` /
+    null → field error on `amountDollars`).
+  - Loads the invoice via `getInvoice` to read the live
+    `balance_cents` and the `job_id` for revalidation.
+  - Delegates to the Phase 11B `recordInvoicePayment` helper,
+    which:
+    - Rejects on `void` (`INVALID_STATUS`).
+    - Runs the Phase 11B `validatePaymentForm` overpayment guard
+      against the live balance.
+    - Inserts an `invoice_payments` row.
+    - Recomputes `amount_paid_cents` + `balance_cents`.
+    - Applies the pure `deriveInvoicePaymentStatus` decision:
+      `unpaid` / `draft` → `paid` with `paid_at` set to the
+      payment's `paid_at` when the balance hits zero; `paid`
+      stays paid; `void` never auto-flips.
+- On success the modal closes and `router.refresh()` re-runs
+  the Server Component loader so the summary, payments table,
+  status badge, and (when status flipped) Mark Receipt Sent
+  affordance all update.
+- Field-level errors surface inline; server-error message
+  surfaces below the form.
+- Backdrop click + Cancel close the modal unless a submit is in
+  flight.
+
+### Payment recording behavior
+
+- `recordInvoicePaymentAction` returns
+  `{ paymentId, amountPaidCents, balanceCents, status, paidAtIso,
+  statusFlippedToPaid }`.
+- `statusFlippedToPaid` is computed server-side by comparing the
+  pre-payment status against the post-payment status — drives
+  the dual-activity write below.
+- Overpayment guarded twice:
+  - Validator (Phase 11B): rejects `amountCents > currentBalance`.
+  - DB CHECK (Phase 11B migration): `invoices.balance_cents >= 0`
+    as the safety net.
+- Money path: `amountDollars` (string) → `parseDollarsToCents`
+  (cents) → `validatePaymentForm` (cents) → DB insert (cents) →
+  summary recompute (cents).
+- After a successful payment the schedule + job detail pages
+  also revalidate so any cross-page state is fresh.
+
+### Mark Receipt Sent behavior
+
+- Trigger renders only when `isMarkReceiptSentEligible` returns
+  true (status `paid` AND `receipt_sent_at` is null).
+- `window.confirm` prompt before the action fires.
+- Action calls Phase 11B `markReceiptSent` which:
+  - Re-verifies business ownership.
+  - Rejects unless status `paid` (`INVALID_STATUS`).
+  - Sets `receipt_sent_at` to operator-supplied ISO or `now()`.
+- On success `router.refresh()` so the receipt-sent timestamp
+  + Receipt label both update and the button disappears.
+- Per §13: **no SMS, no email, no message-automation call.**
+  Operator separately delivers the receipt out-of-band.
+
+### Invoice detail UI states (recap)
+
+| Invoice state | Mark Paid | Mark Receipt Sent |
+|---|---|---|
+| `draft` + balance > 0 | ✅ | ❌ |
+| `unpaid` + balance > 0 | ✅ | ❌ |
+| `paid` + receipt_sent_at null | ❌ (balance is 0) | ✅ |
+| `paid` + receipt_sent_at set | ❌ | ❌ (shows timestamp) |
+| `void` | ❌ | ❌ |
+
+### Activity behavior
+
+Three new activity types ship — all via the existing Phase 1
+`createActivity` helper, all soft-fail (non-blocking on the
+underlying mutation):
+
+| `activity_type` | Source | Details payload |
+|---|---|---|
+| `invoice.payment_recorded` | `recordInvoicePaymentAction` (always on success) | `amount_cents`, `payment_method`, `balance_cents`, `status`. |
+| `invoice.marked_paid` | `recordInvoicePaymentAction` (only when status flipped) | `paid_at`, `total_cents`. |
+| `invoice.receipt_marked_sent` | `markReceiptSentAction` | `receipt_sent_at`, `job_id`. |
+
+- No `sendSms` / `sendEmail` / `notification_logs` /
+  `sendInternalSmsNotification` calls.
+- No `message-automation` triggers.
+- Phase 6D GHL guardrail is not reached from any Phase 11 path.
+
+### Tests / gates
+
+- 9 new `eligibility` pure tests.
+- Targeted: invoices `totals` (19) + `validation` (25) +
+  `display` (10) + `job-completion` (5) + `eligibility` (9) =
+  **68/68**.
+- `npx tsc --noEmit` clean.
+- `npm run test` → **777/777** across 67 files (was 768/768 ×
+  66 at Phase 11D close — Phase 11E adds 9 tests + 1 file).
+- `npm run lint` clean.
+- `npm run build` green; `/admin/invoices/[invoiceId]` grew
+  **226 B → 2.64 kB** (Mark Paid modal + Mark Receipt Sent
+  client bundles). `/admin/invoices` unchanged at **223 B**.
+
+### What Phase 11E deliberately does NOT do
+
+- **No online payments / payment processor integration / payment
+  links.**
+- **No automatic receipt sending.** No PDF generation, no email
+  template, no SMS template.
+- **No customer-facing invoice or receipt page.**
+- **No customer notifications** on any payment / receipt event.
+- **No message-automation outcomes.**
+- **No taxes / discounts / refunds.**
+- **No invoice editing.** Line items remain read-only after
+  creation.
+- **No invoice voiding UI.** The `void` status exists in the
+  Phase 11B enum; no action surfaces it yet.
+- **No partial-payment split UX.** The operator can record
+  multiple payments by submitting the modal multiple times; the
+  schema sums correctly.
+- **No overpayment-credit row.** Overpayments are rejected at the
+  validator + DB-CHECK layers.
+- **No simulation-driven payments.**
+- **No public `/q` changes.**
+- **No new database table or column.** Phase 11B schema covers
+  everything Phase 11E writes.
+- **No new low-level DB helpers.** Both actions compose the
+  existing Phase 11B `recordInvoicePayment` + `markReceiptSent`.
+
+### Assumptions
+
+- `parseDollarsToCents` (originally added in
+  `src/core/door-hanger/calculations.ts` for Phase 5 and reused
+  in Phase 9D's manual job-create + Phase 10D's overlap check)
+  remains the single dollars-input → cents-cents boundary for
+  the admin. Phase 11E reuses it rather than duplicating the
+  parser.
+- The Phase 11B helpers handle the entire status-flip + paid_at
+  + summary-recompute logic; the Phase 11E actions only:
+  (1) re-verify ownership, (2) compute `statusFlippedToPaid` for
+  the dual activity write, and (3) revalidate the affected
+  paths. No double accounting.
+- `router.refresh` (not `router.push`) on success — the operator
+  stays on the invoice detail so they can immediately see the
+  new payment row and the updated balance/status.
+- Manual confirm for Mark Receipt Sent uses `window.confirm` —
+  acceptable per the Phase 10D / Phase 11D precedent for
+  irreversible-feeling actions. Mark Paid uses a full modal
+  because it captures multiple fields.

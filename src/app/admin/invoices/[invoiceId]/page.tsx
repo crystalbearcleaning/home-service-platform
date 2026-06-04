@@ -27,9 +27,15 @@ import {
   getInvoiceLineItems,
   getInvoicePayments,
 } from "@/core/invoices/admin-data";
+import {
+  isMarkPaidEligible,
+  isMarkReceiptSentEligible,
+} from "@/core/invoices/eligibility";
 import { formatJobQuantity } from "@/core/jobs/display";
 
 import { SignOutButton } from "../../sign-out-button";
+import { MarkPaidButton } from "./mark-paid-button";
+import { MarkReceiptSentButton } from "./mark-receipt-sent-button";
 
 export const dynamic = "force-dynamic";
 
@@ -93,7 +99,7 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
 
       <SectionCard
         title="Summary"
-        description="Read-only in Phase 11C. Mark Paid + Mark Receipt Sent ship in Phase 11E."
+        description="Mark Paid records a payment row and recomputes the balance. Mark Receipt Sent stores a manual timestamp — no SMS / email is sent."
       >
         <dl className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
           <KV
@@ -146,6 +152,31 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
             {invoice.receiptSentAt && (
               <div>Receipt sent: {formatIsoLong(invoice.receiptSentAt)}</div>
             )}
+          </div>
+        )}
+
+        {(isMarkPaidEligible({
+          status: invoice.status,
+          balanceCents: invoice.balanceCents,
+        }) ||
+          isMarkReceiptSentEligible({
+            status: invoice.status,
+            receiptSentAtIso: invoice.receiptSentAt,
+          })) && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+            {isMarkPaidEligible({
+              status: invoice.status,
+              balanceCents: invoice.balanceCents,
+            }) && (
+              <MarkPaidButton
+                invoiceId={invoice.id}
+                balanceCents={invoice.balanceCents}
+              />
+            )}
+            {isMarkReceiptSentEligible({
+              status: invoice.status,
+              receiptSentAtIso: invoice.receiptSentAt,
+            }) && <MarkReceiptSentButton invoiceId={invoice.id} />}
           </div>
         )}
       </SectionCard>
@@ -284,7 +315,7 @@ export default async function InvoiceDetailPage({ params }: PageProps) {
             <div className="p-5">
               <EmptyState
                 title="No payments recorded"
-                description="Mark Paid ships in Phase 11E."
+                description="Use Mark Paid in the summary section above to record a payment."
               />
             </div>
           ) : (
