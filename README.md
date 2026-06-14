@@ -252,6 +252,50 @@ add the three new tables but only inside Phase 11B and only if
 explicitly approved. See §§21–22 of the Phase 11 doc before
 extending scope.
 
+Phase 11 is **complete** — see `docs/PHASE_11_QA_REPORT.md` for
+the sign-off.
+
+Phase 12 is the **Revenue / Reporting Foundation** phase. Now
+that Quote → Job → Schedule → Invoice → Payment all exist, Phase
+12 adds owner-facing visibility into cash, production, pipeline,
+unpaid money, and completed work: a new **Reporting Snapshot**
+section at the top of the existing `/admin` Overview page (fixed
+Today / This Week / This Month cards, no range tabs), a new top-
+level `/admin/reports` page (range tabs Today / This Week / This
+Month / Last 30 Days, six cards — Paid Revenue, Invoiced Revenue,
+Unpaid Balance, Completed Job Value, Scheduled Job Value, Quote
+Value Created — and three tables — Unpaid Invoices, Recent
+Payments, Completed Jobs), a new **Reports** entry in the
+sidebar (default placement: Overview group, immediately after
+Dashboard), and a reusable reporting core under
+`src/core/reports/` (`date-ranges`, `totals`, `admin-data`,
+`display`) so the Overview snapshot and the Reports page share
+one canonical set of metric definitions and loaders. Phase 12
+uses a lower-overhead workflow: **Phase 12A is docs only**;
+**Phase 12B builds the entire phase in one pass + QA report +
+Manual App Test Checklist** — no per-step subphases. The source-
+of-truth design doc is:
+
+- `docs/PHASE_12_REVENUE_REPORTING_FOUNDATION.md`
+
+Phase 12 stays narrow: no charts, no custom date picker, no CSV
+/ PDF export, no saved reports, no report builder, no
+forecasting, no goals, no AI insights, no context engine, no
+accounting sync, no QuickBooks / Xero, no taxes, no refunds, no
+deposits, no online payments, no real receipt sending, no
+customer-facing report pages, no public `/q` changes, no
+scheduled report emails, no SMS / email notifications, no
+message-automation outcomes from reporting, no crew payroll
+reports, no technician performance reports, no route reports, no
+marketing attribution beyond Quote Value Created, no simulation
+projections / what-if reports, and no new schema (no migrations,
+no new tables, no new columns). The completed-job range filter
+falls back to `jobs.updated_at` when `status='completed'`
+because Phase 9 did not add a `jobs.completed_at` column; this
+is a documented known limitation in §14 of the Phase 12 doc, not
+a license to add the column in Phase 12. See §§11–12 + §14 of
+the Phase 12 doc before extending scope.
+
 Phase 10 is the **Job Scheduling Foundation** phase. It sits on
 top of Phase 9 Jobs and turns the existing scheduling columns
 (`scheduled_start_at`, `scheduled_end_at`, `arrival_window_label`,
